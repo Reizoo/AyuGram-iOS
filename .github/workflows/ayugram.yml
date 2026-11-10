@@ -1,0 +1,70 @@
+name: AyuGram iOS build
+
+on:
+  push:
+    branches: [ ayu ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Select Xcode from versions.json
+        run: |
+          XCODE_VERSION=$(python3 -c 'import json;print(json.load(open("versions.json"))["xcode"])')
+          sudo xcode-select -s /Applications/Xcode_$XCODE_VERSION.app/Contents/Developer
+          xcodebuild -version
+
+      - name: Canonical source dir
+        run: |
+          sudo mkdir -p /Users/Shared
+          cp -R $GITHUB_WORKSPACE /Users/Shared/
+          mv /Users/Shared/$(basename $GITHUB_WORKSPACE) /Users/Shared/telegram-ios
+
+      - name: Write configuration (own api_id from secrets)
+        env:
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+        run: |
+          cd /Users/Shared/telegram-ios
+          test -n "$TG_API_ID" && test -n "$TG_API_HASH" || { echo "Add TG_API_ID and TG_API_HASH repo secrets"; exit 1; }
+          python3 - <<'PY'
+          import json, os
+          c = json.load(open("build-system/appstore-configuration.json"))
+          c["api_id"] = os.environ["TG_API_ID"]
+          c["api_hash"] = os.environ["TG_API_HASH"]
+          c["is_appstore_build"] = "false"
+          c["enable_siri"] = False
+          c["enable_icloud"] = False
+          json.dump(c, open("ayu-configuration.json", "w"), indent=1)
+          PY
+
+      - name: Build unsigned IPA
+        run: |
+          set -x
+          cd /Users/Shared/telegram-ios
+          BUILD_NUMBER="$(( $(git rev-list --count HEAD) + $(cat build_number_offset) ))"
+          echo "BUILD_NUMBER=$BUILD_NUMBER" >> $GITHUB_ENV
+          python3 build-system/Make/ImportCertificates.py --path build-system/fake-codesigning/certs
+          python3 -u build-system/Make/Make.py \
+            --bazelUserRoot="/private/var/tmp/_bazel_containerhost" \
+            build \
+            --configurationPath="ayu-configuration.json" \
+            --codesigningInformationPath=build-system/fake-codesigning \
+            --configuration=release_arm64 \
+            --buildNumber="$BUILD_NUMBER"
+          mkdir -p build/artifacts
+          for f in bazel-out/applebin_ios-ios_arm*-opt-ST-*/bin/Telegram/Telegram.ipa; do cp "$f" build/artifacts/AyuGram.ipa; done
+          ls -la build/artifacts
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AyuGram-ipa-${{ env.BUILD_NUMBER }}
+          path: /Users/Shared/telegram-ios/build/artifacts/AyuGram.ipa
+          retention-days: 14
