@@ -52,6 +52,20 @@ jobs:
           json.dump(c, open("ayu-configuration.json", "w"), indent=1)
           PY
 
+      - name: Refresh expired fake provisioning profiles (upstream ones ran out 30 Oct 2026)
+        run: |
+          set -e
+          cd /Users/Shared/telegram-ios/build-system/fake-codesigning
+          OSSL=/opt/homebrew/opt/openssl@3/bin/openssl; [ -x "$OSSL" ] || OSSL=openssl
+          T=$(mktemp -d)
+          $OSSL pkcs12 -in certs/SelfSigned.p12 -passin pass: -nodes -legacy -out $T/id.pem 2>/dev/null || $OSSL pkcs12 -in certs/SelfSigned.p12 -passin pass: -nodes -out $T/id.pem
+          for p in profiles/*.mobileprovision; do
+            security cms -D -i "$p" -o $T/p.plist
+            plutil -replace ExpirationDate -date 2036-01-01T00:00:00Z $T/p.plist
+            $OSSL cms -sign -nodetach -binary -outform DER -signer $T/id.pem -in $T/p.plist -out "$p"
+            echo "$p: $(security cms -D -i "$p" | plutil -extract ExpirationDate raw -o - -)"
+          done
+
       - name: Build unsigned IPA
         env:
           TG_API_ID: ${{ secrets.TG_API_ID }}
