@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
@@ -22,10 +22,9 @@ jobs:
           git submodule sync --recursive
           git submodule update --init --recursive --jobs 8
 
-      - name: Select Xcode from versions.json
+      - name: Select Xcode 27.1 (the code uses iOS 27.1 APIs; versions.json still says 26.6)
         run: |
-          XCODE_VERSION=$(python3 -c 'import json;print(json.load(open("versions.json"))["xcode"])')
-          sudo xcode-select -s /Applications/Xcode_$XCODE_VERSION.app/Contents/Developer
+          sudo xcode-select -s /Applications/Xcode_27.1.app/Contents/Developer
           xcodebuild -version
 
       - name: Canonical source dir
@@ -77,7 +76,7 @@ jobs:
           set +e
           {
             python3 build-system/Make/ImportCertificates.py --path build-system/fake-codesigning/certs &&
-            python3 -u build-system/Make/Make.py               --bazelUserRoot="/private/var/tmp/_bazel_containerhost"               build               --configurationPath="ayu-configuration.json"               --codesigningInformationPath=build-system/fake-codesigning               --configuration=release_arm64               --buildNumber="$BUILD_NUMBER"
+            python3 -u build-system/Make/Make.py --overrideXcodeVersion               --bazelUserRoot="/private/var/tmp/_bazel_containerhost"               build               --configurationPath="ayu-configuration.json"               --codesigningInformationPath=build-system/fake-codesigning               --configuration=release_arm64               --buildNumber="$BUILD_NUMBER"
           } 2>&1 | tee /tmp/build.log
           rc=${PIPESTATUS[0]}
           if [ "$rc" -ne 0 ]; then
