@@ -12,8 +12,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: false
           fetch-depth: 0
+
+      - name: Submodules (relative URLs point at the fork, use upstream TelegramMessenger)
+        run: |
+          git config -f .gitmodules submodule.submodules/rlottie/rlottie.url https://github.com/TelegramMessenger/rlottie.git
+          git config -f .gitmodules submodule.submodules/TgVoipWebrtc/tgcalls.url https://github.com/TelegramMessenger/tgcalls.git
+          git submodule sync --recursive
+          git submodule update --init --recursive --jobs 8
 
       - name: Select Xcode from versions.json
         run: |
