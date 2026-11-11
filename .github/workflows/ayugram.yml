@@ -112,7 +112,10 @@ jobs:
           fi
           set -e
           mkdir -p build/artifacts
-          for f in bazel-out/applebin_ios-ios_arm*-opt-ST-*/bin/Telegram/Telegram.ipa; do cp "$f" build/artifacts/AyuGram.ipa; done
+          IPA=$(find -L bazel-out/ -path "*/bin/Telegram/Telegram.ipa" -type f 2>/dev/null | head -1)
+          echo "::notice title=ipa::${IPA:-not found}"
+          if [ -z "$IPA" ]; then find -L bazel-out/ -name "*.ipa" -maxdepth 6 2>/dev/null | head -5 | sed 's/^/::warning title=ipa candidates::/'; exit 1; fi
+          cp "$IPA" build/artifacts/AyuGram.ipa
           ls -la build/artifacts
 
       - name: Save Bazel disk cache
