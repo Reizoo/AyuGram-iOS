@@ -53,19 +53,40 @@ jobs:
           PY
 
       - name: Build unsigned IPA
+        env:
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
         run: |
-          set -x
           cd /Users/Shared/telegram-ios
           BUILD_NUMBER="$(( $(git rev-list --count HEAD) + $(cat build_number_offset) ))"
           echo "BUILD_NUMBER=$BUILD_NUMBER" >> $GITHUB_ENV
-          python3 build-system/Make/ImportCertificates.py --path build-system/fake-codesigning/certs
-          python3 -u build-system/Make/Make.py \
-            --bazelUserRoot="/private/var/tmp/_bazel_containerhost" \
-            build \
-            --configurationPath="ayu-configuration.json" \
-            --codesigningInformationPath=build-system/fake-codesigning \
-            --configuration=release_arm64 \
-            --buildNumber="$BUILD_NUMBER"
+          set +e
+          {
+            python3 build-system/Make/ImportCertificates.py --path build-system/fake-codesigning/certs &&
+            python3 -u build-system/Make/Make.py               --bazelUserRoot="/private/var/tmp/_bazel_containerhost"               build               --configurationPath="ayu-configuration.json"               --codesigningInformationPath=build-system/fake-codesigning               --configuration=release_arm64               --buildNumber="$BUILD_NUMBER"
+          } 2>&1 | tee /tmp/build.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            # public annotations (logs need sign-in): key error lines + the last lines, secrets stripped
+            python3 - <<'PY'
+          import os, re
+          t = open("/tmp/build.log", errors="replace").read()
+          for k in ("TG_API_HASH", "TG_API_ID"):
+              v = os.environ.get(k)
+              if v: t = t.replace(v, "***")
+          lines = [l for l in t.splitlines() if l.strip()]
+          errs = [l for l in lines if re.search(r"(error:|ERROR:|Error:|FAILED|fatal)", l)][-25:]
+          def ann(title, ls):
+              m = "
+".join(ls)[-20000:].replace("%", "%25").replace("", "").replace("
+", "%0A")
+              print("::error title=%s::%s" % (title, m))
+          ann("error lines", errs or ["(none matched)"])
+          ann("last 60 lines", lines[-60:])
+          PY
+            exit $rc
+          fi
+          set -e
           mkdir -p build/artifacts
           for f in bazel-out/applebin_ios-ios_arm*-opt-ST-*/bin/Telegram/Telegram.ipa; do cp "$f" build/artifacts/AyuGram.ipa; done
           ls -la build/artifacts
