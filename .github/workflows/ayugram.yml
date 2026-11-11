@@ -65,6 +65,13 @@ jobs:
             echo "$p: $(security cms -D -i "$p" | plutil -extract ExpirationDate raw -o - -)"
           done
 
+      - name: Restore Bazel disk cache (each run continues where the last one stopped)
+        uses: actions/cache/restore@v4
+        with:
+          path: /Users/runner/bazel-disk-cache
+          key: ayu-bazel-${{ github.run_id }}
+          restore-keys: ayu-bazel-
+
       - name: Build unsigned IPA
         env:
           TG_API_ID: ${{ secrets.TG_API_ID }}
@@ -74,11 +81,15 @@ jobs:
           BUILD_NUMBER="$(( $(git rev-list --count HEAD) + $(cat build_number_offset) ))"
           echo "BUILD_NUMBER=$BUILD_NUMBER" >> $GITHUB_ENV
           set +e
+          # soft stop at 105 min so the log tail and the disk cache get saved before the runner cuts the job
+          ( sleep 6300; echo "ERROR: soft time limit reached, stopping bazel"; pkill -INT -f bazel-9; sleep 60; pkill -f bazel-9; pkill -f Make.py ) &
+          WATCHDOG=$!
           {
             python3 build-system/Make/ImportCertificates.py --path build-system/fake-codesigning/certs &&
-            python3 -u build-system/Make/Make.py --overrideXcodeVersion               --bazelUserRoot="/private/var/tmp/_bazel_containerhost"               build               --configurationPath="ayu-configuration.json"               --codesigningInformationPath=build-system/fake-codesigning               --configuration=release_arm64               --buildNumber="$BUILD_NUMBER"
+            python3 -u build-system/Make/Make.py --overrideXcodeVersion --cacheDir=/Users/runner/bazel-disk-cache               --bazelUserRoot="/private/var/tmp/_bazel_containerhost"               build               --configurationPath="ayu-configuration.json"               --codesigningInformationPath=build-system/fake-codesigning               --configuration=release_arm64               --buildNumber="$BUILD_NUMBER"
           } 2>&1 | tee /tmp/build.log
           rc=${PIPESTATUS[0]}
+          kill $WATCHDOG 2>/dev/null
           if [ "$rc" -ne 0 ]; then
             # public annotations (logs need sign-in): key error lines + the last lines, secrets stripped
             python3 - <<'PY'
@@ -101,6 +112,13 @@ jobs:
           mkdir -p build/artifacts
           for f in bazel-out/applebin_ios-ios_arm*-opt-ST-*/bin/Telegram/Telegram.ipa; do cp "$f" build/artifacts/AyuGram.ipa; done
           ls -la build/artifacts
+
+      - name: Save Bazel disk cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: /Users/runner/bazel-disk-cache
+          key: ayu-bazel-${{ github.run_id }}
 
       - uses: actions/upload-artifact@v4
         with:
