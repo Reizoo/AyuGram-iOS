@@ -77,9 +77,7 @@ jobs:
           lines = [l for l in t.splitlines() if l.strip()]
           errs = [l for l in lines if re.search(r"(error:|ERROR:|Error:|FAILED|fatal)", l)][-25:]
           def ann(title, ls):
-              m = "
-".join(ls)[-20000:].replace("%", "%25").replace("", "").replace("
-", "%0A")
+              m = chr(10).join(ls)[-20000:].replace("%", "%25").replace(chr(13), "%0D").replace(chr(10), "%0A")
               print("::error title=%s::%s" % (title, m))
           ann("error lines", errs or ["(none matched)"])
           ann("last 60 lines", lines[-60:])
