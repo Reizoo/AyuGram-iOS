@@ -6834,11 +6834,15 @@ private final class ChatListLocationContext {
     var rightButton: AnyComponentWithIdentity<NavigationButtonComponentEnvironment>?
     var proxyButton: AnyComponentWithIdentity<NavigationButtonComponentEnvironment>?
     var storyButton: AnyComponentWithIdentity<NavigationButtonComponentEnvironment>?
+    var ayuGhostButton: AnyComponentWithIdentity<NavigationButtonComponentEnvironment>?
     
     var rightButtons: [AnyComponentWithIdentity<NavigationButtonComponentEnvironment>] {
         var result: [AnyComponentWithIdentity<NavigationButtonComponentEnvironment>] = []
         if let rightButton = self.rightButton {
             result.append(rightButton)
+        }
+        if let ayuGhostButton = self.ayuGhostButton {
+            result.append(ayuGhostButton)
         }
         if let storyButton = self.storyButton {
             result.append(storyButton)
@@ -7276,6 +7280,7 @@ private final class ChatListLocationContext {
                             self?.parentController?.editPressed()
                         }
                     )))
+                    self.ayuGhostButton = nil
                 } else {
                     self.rightButton = AnyComponentWithIdentity(id: "compose", component: AnyComponent(NavigationButtonComponent(
                         content: .icon(imageName: "Chat List/ComposeIcon"),
@@ -7283,6 +7288,7 @@ private final class ChatListLocationContext {
                             self?.parentController?.composePressed()
                         }
                     )))
+                    self.ayuGhostButton = self.makeAyuGhostButton()
                 }
                 
                 if isReorderingTabs {
@@ -7429,6 +7435,22 @@ private final class ChatListLocationContext {
             }
             self.parentController?.maybeDisplayStoryTooltip()
         })
+    }
+    
+    /// AyuGram: header button that turns all ghost mode switches on or off.
+    private func makeAyuGhostButton() -> AnyComponentWithIdentity<NavigationButtonComponentEnvironment> {
+        let isEnabled = AyuSettings.isGhostModeEnabled
+        return AnyComponentWithIdentity(id: isEnabled ? "ayuGhostOn" : "ayuGhostOff", component: AnyComponent(NavigationButtonComponent(
+            content: .text(title: isEnabled ? "👻" : "👁", isBold: false),
+            pressed: { [weak self] _ in
+                guard let self else {
+                    return
+                }
+                AyuSettings.setGhostModeEnabled(!AyuSettings.isGhostModeEnabled)
+                self.ayuGhostButton = self.makeAyuGhostButton()
+                self.parentController?.requestLayout(transition: .animated(duration: 0.3, curve: .spring))
+            }
+        )))
     }
     
     private func updateForum(

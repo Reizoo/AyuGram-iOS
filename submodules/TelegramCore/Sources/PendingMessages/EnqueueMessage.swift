@@ -735,6 +735,9 @@ public func enqueueMessages(account: Account, peerId: PeerId, messages: [Enqueue
             for messageId in ephemeralMessageIds {
                 let _ = _internal_sendEphemeralOutgoingMessage(account: account, messageId: messageId).startStandalone()
             }
+            if resultIds.contains(where: { $0 != nil }) {
+                ayuMarkReadAfterSend(account: account, peerId: peerId)
+            }
             return resultIds
         }
     }

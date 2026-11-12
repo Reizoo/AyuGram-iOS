@@ -1,5 +1,7 @@
 import Foundation
 import Postbox
+import TelegramApi
+import SwiftSignalKit
 
 /// AyuGram client-side settings. Stored in UserDefaults so that any thread
 /// (network, postbox) can read them synchronously.
@@ -37,6 +39,36 @@ public enum AyuSettings {
     public static var sendReadStories: Bool {
         get { return bool("ayu.sendReadStories", default: true) }
         set { defaults.set(newValue, forKey: "ayu.sendReadStories") }
+    }
+
+    /// All four ghost mode switches (online, typing, read messages, read stories) are off.
+    public static var isGhostModeEnabled: Bool {
+        return !sendOnlinePackets && !sendTyping && !sendReadMessages && !sendReadStories
+    }
+
+    public static func setGhostModeEnabled(_ enabled: Bool) {
+        sendOnlinePackets = !enabled
+        sendTyping = !enabled
+        sendReadMessages = !enabled
+        sendReadStories = !enabled
+    }
+
+    /// With read receipts off, still mark the chat as read when sending a message to it.
+    public static var markReadAfterSend: Bool {
+        get { return bool("ayu.markReadAfterSend", default: true) }
+        set { defaults.set(newValue, forKey: "ayu.markReadAfterSend") }
+    }
+
+    /// Keep self-destructing (view once / timer) photos and videos after they are viewed.
+    public static var saveSelfDestructingMedia: Bool {
+        get { return bool("ayu.saveSelfDestructingMedia", default: true) }
+        set { defaults.set(newValue, forKey: "ayu.saveSelfDestructingMedia") }
+    }
+
+    /// Do not load sponsored messages in channels.
+    public static var hideSponsoredMessages: Bool {
+        get { return bool("ayu.hideSponsoredMessages", default: true) }
+        set { defaults.set(newValue, forKey: "ayu.hideSponsoredMessages") }
     }
 
     /// Keep messages that other people deleted.
@@ -142,6 +174,65 @@ func ayuMarkMessagesDeleted(transaction: Transaction, ids: [MessageId]) -> [Mess
         })
     }
     return remaining
+}
+
+/// Read receipts are off but the user just wrote to the chat: mark its history read on the
+/// server, as AyuGram's "read on interaction" does.
+func ayuMarkReadAfterSend(account: Account, peerId: PeerId) {
+    if AyuSettings.sendReadMessages || !AyuSettings.markReadAfterSend {
+        return
+    }
+    let network = account.network
+    let stateManager = account.stateManager
+    let _ = (account.postbox.transaction { transaction -> (Api.InputPeer, Int32)? in
+        guard let peer = transaction.getPeer(peerId), let inputPeer = apiInputPeer(peer) else {
+            return nil
+        }
+        guard let maxId = transaction.getTopPeerMessageId(peerId: peerId, namespace: Namespaces.Message.Cloud)?.id else {
+            return nil
+        }
+        return (inputPeer, maxId)
+    }
+    |> mapToSignal { value -> Signal<Never, NoError> in
+        guard let (inputPeer, maxId) = value else {
+            return .complete()
+        }
+        if case let .inputPeerChannel(channelData) = inputPeer {
+            return network.request(Api.functions.channels.readHistory(channel: .inputChannel(.init(channelId: channelData.channelId, accessHash: channelData.accessHash)), maxId: maxId))
+            |> `catch` { _ -> Signal<Api.Bool, NoError> in
+                return .single(.boolFalse)
+            }
+            |> ignoreValues
+        } else {
+            return network.request(Api.functions.messages.readHistory(peer: inputPeer, maxId: maxId))
+            |> map(Optional.init)
+            |> `catch` { _ -> Signal<Api.messages.AffectedMessages?, NoError> in
+                return .single(nil)
+            }
+            |> mapToSignal { result -> Signal<Never, NoError> in
+                if let result = result, case let .affectedMessages(affectedMessagesData) = result {
+                    stateManager?.addUpdateGroups([.updatePts(pts: affectedMessagesData.pts, ptsCount: affectedMessagesData.ptsCount)])
+                }
+                return .complete()
+            }
+        }
+    }).start()
+}
+
+/// An edit from the server that turns a viewed self-destructing photo or video into expired
+/// content: keep the previous media and drop the timers.
+func ayuKeepSelfDestructingMedia(previous: Message, media: [Media], attributes: [MessageAttribute]) -> (media: [Media], attributes: [MessageAttribute]) {
+    if !AyuSettings.saveSelfDestructingMedia {
+        return (media, attributes)
+    }
+    if !media.contains(where: { $0 is TelegramMediaExpiredContent }) {
+        return (media, attributes)
+    }
+    if !previous.media.contains(where: { $0 is TelegramMediaImage || $0 is TelegramMediaFile }) {
+        return (media, attributes)
+    }
+    let updatedAttributes = attributes.filter { !($0 is AutoremoveTimeoutMessageAttribute) && !($0 is AutoclearTimeoutMessageAttribute) }
+    return (previous.media, updatedAttributes)
 }
 
 /// Deletes messages the server no longer has (history validation), or only marks them as

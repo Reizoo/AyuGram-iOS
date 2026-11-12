@@ -4702,6 +4702,9 @@ func replayFinalState(
                     }
 
                     updatedAttributes = ayuEditHistoryAttributes(previous: previousMessage, updatedText: message.text, updatedAttributes: updatedAttributes)
+                    let ayuKept = ayuKeepSelfDestructingMedia(previous: previousMessage, media: updatedMedia, attributes: updatedAttributes)
+                    updatedMedia = ayuKept.media
+                    updatedAttributes = ayuKept.attributes
 
                     return .update(message.withUpdatedLocalTags(updatedLocalTags).withUpdatedFlags(updatedFlags).withUpdatedAttributes(updatedAttributes).withUpdatedMedia(updatedMedia))
                 })

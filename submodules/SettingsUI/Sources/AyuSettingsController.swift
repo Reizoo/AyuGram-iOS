@@ -21,8 +21,11 @@ private enum AyuSettingsToggle: Int32 {
     case sendTyping
     case sendReadMessages
     case sendReadStories
+    case readAfterSend
     case saveDeleted
     case saveEdits
+    case saveSelfDestructing
+    case hideAds
 
     var title: String {
         switch self {
@@ -34,6 +37,12 @@ private enum AyuSettingsToggle: Int32 {
             return "Отмечать сообщения прочитанными"
         case .sendReadStories:
             return "Отмечать истории просмотренными"
+        case .readAfterSend:
+            return "Читать при ответе"
+        case .saveSelfDestructing:
+            return "Сохранять одноразовые фото и видео"
+        case .hideAds:
+            return "Скрывать рекламу в каналах"
         case .saveDeleted:
             return "Сохранять удалённые сообщения"
         case .saveEdits:
@@ -51,6 +60,12 @@ private enum AyuSettingsToggle: Int32 {
             return AyuSettings.sendReadMessages
         case .sendReadStories:
             return AyuSettings.sendReadStories
+        case .readAfterSend:
+            return AyuSettings.markReadAfterSend
+        case .saveSelfDestructing:
+            return AyuSettings.saveSelfDestructingMedia
+        case .hideAds:
+            return AyuSettings.hideSponsoredMessages
         case .saveDeleted:
             return AyuSettings.saveDeletedMessages
         case .saveEdits:
@@ -68,6 +83,12 @@ private enum AyuSettingsToggle: Int32 {
             AyuSettings.sendReadMessages = value
         case .sendReadStories:
             AyuSettings.sendReadStories = value
+        case .readAfterSend:
+            AyuSettings.markReadAfterSend = value
+        case .saveSelfDestructing:
+            AyuSettings.saveSelfDestructingMedia = value
+        case .hideAds:
+            AyuSettings.hideSponsoredMessages = value
         case .saveDeleted:
             AyuSettings.saveDeletedMessages = value
         case .saveEdits:
@@ -79,6 +100,7 @@ private enum AyuSettingsToggle: Int32 {
 private enum AyuSettingsSection: Int32 {
     case ghost
     case history
+    case other
 }
 
 private enum AyuSettingsEntry: ItemListNodeEntry {
@@ -87,6 +109,7 @@ private enum AyuSettingsEntry: ItemListNodeEntry {
     case ghostFooter
     case historyHeader
     case historyFooter
+    case otherHeader
 
     var section: ItemListSectionId {
         switch self {
@@ -94,12 +117,16 @@ private enum AyuSettingsEntry: ItemListNodeEntry {
             return AyuSettingsSection.ghost.rawValue
         case .historyHeader, .historyFooter:
             return AyuSettingsSection.history.rawValue
+        case .otherHeader:
+            return AyuSettingsSection.other.rawValue
         case let .toggle(toggle, _):
             switch toggle {
-            case .sendOnline, .sendTyping, .sendReadMessages, .sendReadStories:
+            case .sendOnline, .sendTyping, .sendReadMessages, .sendReadStories, .readAfterSend:
                 return AyuSettingsSection.ghost.rawValue
-            case .saveDeleted, .saveEdits:
+            case .saveDeleted, .saveEdits, .saveSelfDestructing:
                 return AyuSettingsSection.history.rawValue
+            case .hideAds:
+                return AyuSettingsSection.other.rawValue
             }
         }
     }
@@ -118,17 +145,25 @@ private enum AyuSettingsEntry: ItemListNodeEntry {
                 return 3
             case .sendReadStories:
                 return 4
+            case .readAfterSend:
+                return 5
+            case .saveSelfDestructing:
+                return 13
+            case .hideAds:
+                return 21
             case .saveDeleted:
                 return 11
             case .saveEdits:
                 return 12
             }
         case .ghostFooter:
-            return 5
+            return 6
         case .historyHeader:
             return 10
         case .historyFooter:
-            return 13
+            return 14
+        case .otherHeader:
+            return 20
         }
     }
 
@@ -142,9 +177,11 @@ private enum AyuSettingsEntry: ItemListNodeEntry {
         case .ghostHeader:
             return ItemListSectionHeaderItem(presentationData: presentationData, text: "РЕЖИМ ПРИЗРАКА", sectionId: self.section)
         case .ghostFooter:
-            return ItemListTextItem(presentationData: presentationData, text: .plain("Выключенные пункты не отправляются на сервер. Прочитанное отмечается только у тебя."), sectionId: self.section)
+            return ItemListTextItem(presentationData: presentationData, text: .plain("Выключенные пункты не отправляются на сервер. Прочитанное отмечается только у тебя. «Читать при ответе» отмечает чат прочитанным, когда ты сам туда пишешь. Кнопка 👻 в списке чатов включает и выключает режим призрака целиком."), sectionId: self.section)
         case .historyHeader:
             return ItemListSectionHeaderItem(presentationData: presentationData, text: "ИСТОРИЯ СООБЩЕНИЙ", sectionId: self.section)
+        case .otherHeader:
+            return ItemListSectionHeaderItem(presentationData: presentationData, text: "ПРОЧЕЕ", sectionId: self.section)
         case .historyFooter:
             return ItemListTextItem(presentationData: presentationData, text: .plain("Удалённые сообщения остаются в чате с пометкой 🗑. Старые версии правок — в меню сообщения → «История правок»."), sectionId: self.section)
         case let .toggle(toggle, value):
@@ -158,15 +195,17 @@ private enum AyuSettingsEntry: ItemListNodeEntry {
 private func ayuSettingsEntries() -> [AyuSettingsEntry] {
     var entries: [AyuSettingsEntry] = []
     entries.append(.ghostHeader)
-    for toggle in [AyuSettingsToggle.sendOnline, .sendTyping, .sendReadMessages, .sendReadStories] {
+    for toggle in [AyuSettingsToggle.sendOnline, .sendTyping, .sendReadMessages, .sendReadStories, .readAfterSend] {
         entries.append(.toggle(toggle, toggle.value))
     }
     entries.append(.ghostFooter)
     entries.append(.historyHeader)
-    for toggle in [AyuSettingsToggle.saveDeleted, .saveEdits] {
+    for toggle in [AyuSettingsToggle.saveDeleted, .saveEdits, .saveSelfDestructing] {
         entries.append(.toggle(toggle, toggle.value))
     }
     entries.append(.historyFooter)
+    entries.append(.otherHeader)
+    entries.append(.toggle(.hideAds, AyuSettingsToggle.hideAds.value))
     return entries
 }
 

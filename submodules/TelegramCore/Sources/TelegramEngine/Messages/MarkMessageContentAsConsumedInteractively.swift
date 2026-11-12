@@ -198,6 +198,7 @@ func markMessageContentAsConsumedRemotely(transaction: Transaction, messageId: M
         
         let timestamp = Int32(CFAbsoluteTimeGetCurrent() + NSTimeIntervalSince1970)
         let countdownBeginTime = consumeDate ?? timestamp
+        var ayuKeepSelfDestructingMedia = false
         
         for i in 0 ..< updatedAttributes.count {
             if let attribute = updatedAttributes[i] as? AutoremoveTimeoutMessageAttribute {
@@ -207,7 +208,9 @@ func markMessageContentAsConsumedRemotely(transaction: Transaction, messageId: M
                                  
                     if message.id.peerId.namespace == Namespaces.Peer.SecretChat {
                     } else {
-                        if attribute.timeout == viewOnceTimeout || timestamp >= autoremoveExpiryTimestamp(countdownBeginTime: countdownBeginTime, timeout: attribute.timeout) {
+                        if AyuSettings.saveSelfDestructingMedia {
+                            ayuKeepSelfDestructingMedia = true
+                        } else if attribute.timeout == viewOnceTimeout || timestamp >= autoremoveExpiryTimestamp(countdownBeginTime: countdownBeginTime, timeout: attribute.timeout) {
                             for i in 0 ..< updatedMedia.count {
                                 if let _ = updatedMedia[i] as? TelegramMediaImage {
                                     updatedMedia[i] = TelegramMediaExpiredContent(data: .image)
@@ -231,6 +234,9 @@ func markMessageContentAsConsumedRemotely(transaction: Transaction, messageId: M
                     
                     if message.id.peerId.namespace == Namespaces.Peer.SecretChat {
                     } else {
+                        if AyuSettings.saveSelfDestructingMedia {
+                            ayuKeepSelfDestructingMedia = true
+                        } else {
                         for i in 0 ..< updatedMedia.count {
                             if attribute.timeout == viewOnceTimeout || timestamp >= autoremoveExpiryTimestamp(countdownBeginTime: countdownBeginTime, timeout: attribute.timeout) {
                                 if let _ = updatedMedia[i] as? TelegramMediaImage {
@@ -246,11 +252,17 @@ func markMessageContentAsConsumedRemotely(transaction: Transaction, messageId: M
                                 }
                             }
                         }
+                        }
                     }
                 }
             }
         }
         
+        if ayuKeepSelfDestructingMedia {
+            // AyuGram: keep the media and drop the timers, so it stays as a regular photo or video.
+            updatedAttributes.removeAll(where: { $0 is AutoremoveTimeoutMessageAttribute || $0 is AutoclearTimeoutMessageAttribute })
+        }
+
         if updateMessage {
             transaction.updateMessage(message.id, update: { currentMessage in
                 var storeForwardInfo: StoreMessageForwardInfo?
