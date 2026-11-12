@@ -235,6 +235,53 @@ func ayuKeepSelfDestructingMedia(previous: Message, media: [Media], attributes: 
     return (previous.media, updatedAttributes)
 }
 
+/// A reply to a message that was deleted on the server (kept locally by AyuGram) cannot
+/// reference it, so the reply is dropped and the deleted message is quoted at the top instead.
+func ayuReplaceReplyToDeletedMessage(transaction: Transaction, message: EnqueueMessage) -> EnqueueMessage {
+    guard case let .message(text, attributes, inlineStickers, mediaReference, threadId, replyToMessageId, replyToStoryId, localGroupingKey, correlationId, bubbleUpEmojiOrStickersets) = message else {
+        return message
+    }
+    guard let replySubject = replyToMessageId, let replied = transaction.getMessage(replySubject.messageId), replied.ayuDeletedAttribute != nil else {
+        return message
+    }
+
+    var quotedText = replied.text
+    if let quote = replySubject.quote, !quote.text.isEmpty {
+        quotedText = quote.text
+    }
+    if quotedText.isEmpty {
+        quotedText = replied.media.isEmpty ? "…" : "[медиа]"
+    }
+    var quote = quotedText
+    if let author = replied.author {
+        quote = "\(author.debugDisplayTitle): \(quotedText)"
+    }
+    let quoteLength = (quote as NSString).length
+    let prefix = quote + "\n"
+    let prefixLength = (prefix as NSString).length
+
+    var updatedAttributes: [MessageAttribute] = []
+    var entities: [MessageTextEntity] = [MessageTextEntity(range: 0 ..< quoteLength, type: .BlockQuote(isCollapsed: false))]
+    for attribute in attributes {
+        if let attribute = attribute as? TextEntitiesMessageAttribute {
+            for entity in attribute.entities {
+                entities.append(MessageTextEntity(range: (entity.range.lowerBound + prefixLength) ..< (entity.range.upperBound + prefixLength), type: entity.type))
+            }
+        } else {
+            updatedAttributes.append(attribute)
+        }
+    }
+    updatedAttributes.append(TextEntitiesMessageAttribute(entities: entities))
+
+    // In a forum topic the reply also routes the message into the topic: keep it on the topic root.
+    var updatedReply: EngineMessageReplySubject?
+    if let threadId = threadId, let peer = transaction.getPeer(replied.id.peerId), peer.isForum {
+        updatedReply = EngineMessageReplySubject(messageId: MessageId(peerId: replied.id.peerId, namespace: Namespaces.Message.Cloud, id: Int32(clamping: threadId)), quote: nil, innerSubject: nil)
+    }
+
+    return .message(text: prefix + text, attributes: updatedAttributes, inlineStickers: inlineStickers, mediaReference: mediaReference, threadId: threadId, replyToMessageId: updatedReply, replyToStoryId: replyToStoryId, localGroupingKey: localGroupingKey, correlationId: correlationId, bubbleUpEmojiOrStickersets: bubbleUpEmojiOrStickersets)
+}
+
 /// Deletes messages the server no longer has (history validation), or only marks them as
 /// deleted when deleted messages are kept.
 func ayuDeleteOrMarkMessages(transaction: Transaction, mediaBox: MediaBox, ids: [MessageId]) {

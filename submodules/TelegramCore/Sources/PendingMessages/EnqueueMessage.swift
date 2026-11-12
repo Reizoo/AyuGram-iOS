@@ -833,6 +833,11 @@ public func resendMessages(account: Account, messageIds: [MessageId]) -> Signal<
 }
 
 func enqueueMessages(transaction: Transaction, account: Account, peerId: PeerId, messages: [(Bool, EnqueueMessage)], disableAutoremove: Bool = false, transformGroupingKeysWithPeerId: Bool = false) -> [MessageId?] {
+    // AyuGram: a reply to a deleted (locally kept) message becomes a quote.
+    let messages = messages.map { item -> (Bool, EnqueueMessage) in
+        return (item.0, ayuReplaceReplyToDeletedMessage(transaction: transaction, message: item.1))
+    }
+
     /**
      * If it is a support account, mark messages as read here as they are
      * not marked as read when chat is opened.
