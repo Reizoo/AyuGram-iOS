@@ -144,6 +144,15 @@ func ayuMarkMessagesDeleted(transaction: Transaction, ids: [MessageId]) -> [Mess
     return remaining
 }
 
+/// Deletes messages the server no longer has (history validation), or only marks them as
+/// deleted when deleted messages are kept.
+func ayuDeleteOrMarkMessages(transaction: Transaction, mediaBox: MediaBox, ids: [MessageId]) {
+    let idsToDelete = AyuSettings.saveDeletedMessages ? ayuMarkMessagesDeleted(transaction: transaction, ids: ids) : ids
+    if !idsToDelete.isEmpty {
+        _internal_deleteMessages(transaction: transaction, mediaBox: mediaBox, ids: idsToDelete)
+    }
+}
+
 /// Attributes for an edited message: carries over the edit history of the previous
 /// version and appends its text when the text changed.
 func ayuEditHistoryAttributes(previous: Message, updatedText: String, updatedAttributes: [MessageAttribute]) -> [MessageAttribute] {

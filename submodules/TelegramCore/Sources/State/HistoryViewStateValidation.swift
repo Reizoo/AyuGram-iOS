@@ -43,6 +43,10 @@ private enum HistoryState {
     }
     
     func isMessageValid(_ message: Message) -> Bool {
+        if message.ayuDeletedAttribute != nil {
+            // AyuGram: kept after deletion, the server no longer has it; never revalidate.
+            return true
+        }
         switch self {
         case let .channel(_, state):
             if let invalidatedPts = state.invalidatedPts {
@@ -890,7 +894,7 @@ private func validateBatch(postbox: Postbox, network: Network, transaction: Tran
                                             if currentMessage.localTags.contains(.OutgoingLiveLocation) {
                                                 updatedLocalTags.insert(.OutgoingLiveLocation)
                                             }
-                                            return .update(message.withUpdatedLocalTags(updatedLocalTags))
+                                            return .update(message.withUpdatedLocalTags(updatedLocalTags).withUpdatedAttributes(ayuEditHistoryAttributes(previous: currentMessage, updatedText: message.text, updatedAttributes: message.attributes)))
                                         } else {
                                             var storeForwardInfo: StoreMessageForwardInfo?
                                             if let forwardInfo = currentMessage.forwardInfo {
@@ -984,7 +988,7 @@ private func validateBatch(postbox: Postbox, network: Network, transaction: Tran
                                         return .update(StoreMessage(id: currentMessage.id, customStableId: nil, globallyUniqueId: currentMessage.globallyUniqueId, groupingKey: currentMessage.groupingKey, threadId: currentMessage.threadId, timestamp: currentMessage.timestamp, flags: StoreMessageFlags(currentMessage.flags), tags: updatedTags, globalTags: currentMessage.globalTags, localTags: currentMessage.localTags, forwardInfo: storeForwardInfo, authorId: currentMessage.author?.id, text: currentMessage.text, attributes: attributes, media: currentMessage.media))
                                     })
                                 } else {
-                                    _internal_deleteMessages(transaction: transaction, mediaBox: postbox.mediaBox, ids: [id])
+                                    ayuDeleteOrMarkMessages(transaction: transaction, mediaBox: postbox.mediaBox, ids: [id])
                                     Logger.shared.log("HistoryValidation", "deleting message \(id) in \(id.peerId)")
                                 }
                             }
@@ -1134,7 +1138,7 @@ private func validateReplyThreadBatch(postbox: Postbox, network: Network, transa
                                         if currentMessage.localTags.contains(.OutgoingLiveLocation) {
                                             updatedLocalTags.insert(.OutgoingLiveLocation)
                                         }
-                                        return .update(message.withUpdatedLocalTags(updatedLocalTags))
+                                        return .update(message.withUpdatedLocalTags(updatedLocalTags).withUpdatedAttributes(ayuEditHistoryAttributes(previous: currentMessage, updatedText: message.text, updatedAttributes: message.attributes)))
                                     } else {
                                         var storeForwardInfo: StoreMessageForwardInfo?
                                         if let forwardInfo = currentMessage.forwardInfo {
@@ -1167,7 +1171,7 @@ private func validateReplyThreadBatch(postbox: Postbox, network: Network, transa
                 
                     for id in removedMessageIds {
                         if !validMessageIds.contains(id) {
-                            _internal_deleteMessages(transaction: transaction, mediaBox: postbox.mediaBox, ids: [id])
+                            ayuDeleteOrMarkMessages(transaction: transaction, mediaBox: postbox.mediaBox, ids: [id])
                             Logger.shared.log("HistoryValidation", "deleting thread message \(id) in \(id.peerId)")
                         }
                     }
