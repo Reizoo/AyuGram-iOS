@@ -485,6 +485,9 @@ private class ReplyThreadHistoryContextImpl {
                 |> ignoreValues
                 if revalidate {
                 }
+                if !AyuSettings.sendReadMessages {
+                    return
+                }
                 strongSelf.readDisposable.set(signal.start())
             } else {
                 var signal = strongSelf.account.network.request(Api.functions.messages.readDiscussion(peer: inputPeer, msgId: Int32(clamping: threadId), readMaxId: messageIndex.id.id))
@@ -519,6 +522,9 @@ private class ReplyThreadHistoryContextImpl {
                     |> ignoreValues
                     signal = signal
                     |> then(validateSignal)
+                }
+                if !AyuSettings.sendReadMessages {
+                    return
                 }
                 strongSelf.readDisposable.set(signal.start())
             }

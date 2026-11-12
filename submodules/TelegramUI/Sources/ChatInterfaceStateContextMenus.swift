@@ -1563,6 +1563,35 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
             }
         }
         
+        if let ayuEditHistory = message.ayuEditHistoryAttribute, !ayuEditHistory.texts.isEmpty {
+            actions.append(.action(ContextMenuActionItem(text: "История правок", icon: { theme in
+                return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Edit"), color: theme.actionSheet.primaryTextColor)
+            }, action: { c, _ in
+                let presentationData = context.sharedContext.currentPresentationData.with { $0 }
+                var historyText = ""
+                for i in 0 ..< ayuEditHistory.texts.count {
+                    if !historyText.isEmpty {
+                        historyText.append("\n\n")
+                    }
+                    if i < ayuEditHistory.dates.count {
+                        let date = Date(timeIntervalSince1970: Double(ayuEditHistory.dates[i]))
+                        historyText.append("[\(DateFormatter.localizedString(from: date, dateStyle: .short, timeStyle: .short))]\n")
+                    }
+                    historyText.append(ayuEditHistory.texts[i])
+                }
+                c?.dismiss(completion: {
+                    controllerInteraction.presentController(textAlertController(
+                        context: context,
+                        title: "История правок",
+                        text: historyText,
+                        actions: [
+                            TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_OK, action: {})
+                        ]
+                    ), nil)
+                })
+            })))
+        }
+
         if (loggingSettings.logToFile || loggingSettings.logToConsole) && !downloadableMediaResourceInfos.isEmpty {
             actions.append(.action(ContextMenuActionItem(text: "Send Logs", icon: { theme in
                 return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Message"), color: theme.actionSheet.primaryTextColor)

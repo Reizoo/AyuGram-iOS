@@ -25,6 +25,7 @@ import ContextUI
 
 private final class PrivacyAndSecurityControllerArguments {
     let account: Account
+    var openAyuSettings: (() -> Void)?
     let openBlockedUsers: () -> Void
     let openLastSeenPrivacy: () -> Void
     let openGroupsPrivacy: () -> Void
@@ -136,10 +137,11 @@ private enum PrivacyAndSecurityEntry: ItemListNodeEntry {
     case dataSettings(PresentationTheme, String)
     case dataSettingsInfo(PresentationTheme, String)
     case openLinksIn(PresentationTheme, String, String)
+    case ayuSettings
     
     var section: ItemListSectionId {
         switch self {
-        case .blockedPeers, .activeSessions, .passcode, .twoStepVerification, .passkeys, .messageAutoremoveTimeout, .messageAutoremoveInfo:
+        case .ayuSettings, .blockedPeers, .activeSessions, .passcode, .twoStepVerification, .passkeys, .messageAutoremoveTimeout, .messageAutoremoveInfo:
             return PrivacyAndSecuritySection.general.rawValue
         case .loginEmail, .loginEmailInfo:
             return PrivacyAndSecuritySection.loginEmail.rawValue
@@ -224,11 +226,19 @@ private enum PrivacyAndSecurityEntry: ItemListNodeEntry {
                 return 32
             case .openLinksIn:
                 return 33
+            case .ayuSettings:
+                return 0
         }
     }
     
     static func ==(lhs: PrivacyAndSecurityEntry, rhs: PrivacyAndSecurityEntry) -> Bool {
         switch lhs {
+            case .ayuSettings:
+                if case .ayuSettings = rhs {
+                    return true
+                } else {
+                    return false
+                }
             case let .privacyHeader(lhsTheme, lhsText):
                 if case let .privacyHeader(rhsTheme, rhsText) = rhs, lhsTheme === rhsTheme, lhsText == rhsText {
                     return true
@@ -437,6 +447,10 @@ private enum PrivacyAndSecurityEntry: ItemListNodeEntry {
     func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
         let arguments = arguments as! PrivacyAndSecurityControllerArguments
         switch self {
+            case .ayuSettings:
+                return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, title: "AyuGram", label: "", sectionId: self.section, style: .blocks, action: {
+                    arguments.openAyuSettings?()
+                })
             case let .privacyHeader(_, text):
                 return ItemListSectionHeaderItem(presentationData: presentationData, text: text, sectionId: self.section)
             case let .blockedPeers(_, text, value):
@@ -664,6 +678,7 @@ private func privacyAndSecurityControllerEntries(
     appConfiguration: AppConfiguration
 ) -> [PrivacyAndSecurityEntry] {
     var entries: [PrivacyAndSecurityEntry] = []
+    entries.append(.ayuSettings)
     
     entries.append(.blockedPeers(presentationData.theme, presentationData.strings.Settings_BlockedUsers, blockedPeerCount == nil ? "" : (blockedPeerCount == 0 ? presentationData.strings.PrivacySettings_BlockedPeersEmpty : "\(blockedPeerCount!)")))
     if activeWebsitesCount != 0 {
@@ -1559,6 +1574,9 @@ public func privacyAndSecurityController(
             }
         }))
     })
+    arguments.openAyuSettings = {
+        pushControllerImpl?(ayuSettingsController(context: context), true)
+    }
     
     actionsDisposable.add(context.engine.peers.managedUpdatedRecentPeers().start())
 
