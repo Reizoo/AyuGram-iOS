@@ -177,6 +177,27 @@ private func legacyDocumentsPath() -> String {
     return NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0] + "/legacy"
 }
 
+/// AyuGram: app group container for a re-signed build whose app group is not group.<bundle id>.
+/// Tries every group listed in embedded.mobileprovision, then a folder in the app's own container.
+private func ayuFallbackAppGroupUrl() -> URL? {
+    if let profilePath = Bundle.main.path(forResource: "embedded", ofType: "mobileprovision"), let data = try? Data(contentsOf: URL(fileURLWithPath: profilePath)), let startRange = data.range(of: Data("<?xml".utf8)), let endRange = data.range(of: Data("</plist>".utf8), in: startRange.lowerBound ..< data.endIndex) {
+        let plistData = data.subdata(in: startRange.lowerBound ..< endRange.upperBound)
+        if let plist = (try? PropertyListSerialization.propertyList(from: plistData, options: [], format: nil)) as? [String: Any], let entitlements = plist["Entitlements"] as? [String: Any], let groups = entitlements["com.apple.security.application-groups"] as? [String] {
+            for group in groups {
+                if let url = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group) {
+                    return url
+                }
+            }
+        }
+    }
+    if let supportUrl = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+        let url = supportUrl.appendingPathComponent("ayu-shared", isDirectory: true)
+        let _ = try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true, attributes: nil)
+        return url
+    }
+    return nil
+}
+
 protocol SupportedStartCallIntent {
     @available(iOS 10.0, *)
     var contacts: [INPerson]? { get }
@@ -562,8 +583,11 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
         try! PasscodeEnvironment.shared.configure(PasscodeConfiguration(appGroupIdentifier: appGroupName, processRole: .mainApp, biometricKeychainService: walletBiometricKeychainService), privateAccessGroup: {
             BuildConfig.keychainAccessGroup(baseAppBundleId: baseAppBundleId)
         })
-        let maybeAppGroupUrl = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupName)
-        
+        // AyuGram: a re-signed (sideloaded) build usually has a renamed app group, so
+        // group.<bundle id> is not available. Fall back to the group from the embedded
+        // provisioning profile, then to the app's own container.
+        let maybeAppGroupUrl = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupName) ?? ayuFallbackAppGroupUrl()
+
         let buildConfig = BuildConfig(baseAppBundleId: baseAppBundleId)
         self.buildConfig = buildConfig
         let signatureDict = BuildConfigExtra.signatureDict()
