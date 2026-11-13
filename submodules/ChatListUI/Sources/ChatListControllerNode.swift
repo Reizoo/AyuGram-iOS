@@ -2517,6 +2517,9 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
 }
 
 func shouldDisplayStoriesInChatListHeader(storySubscriptions: EngineStorySubscriptions, isHidden: Bool) -> Bool {
+    if AyuSettings.hideStories {
+        return false
+    }
     if !storySubscriptions.items.isEmpty {
         return true
     }

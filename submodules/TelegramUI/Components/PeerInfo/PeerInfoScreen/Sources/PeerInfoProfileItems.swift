@@ -900,6 +900,33 @@ func infoItems(
         }
     }
     
+    // AyuGram: the peer's id (Bot API form), tap to copy. Placed after the other value rows.
+    if AyuSettings.showPeerId, let peer = data.peer {
+        let rawId = peer.id.id._internalGetInt64Value()
+        let botApiId: Int64
+        if peer.id.namespace == Namespaces.Peer.CloudChannel {
+            botApiId = -(1000000000000 + rawId)
+        } else if peer.id.namespace == Namespaces.Peer.CloudGroup {
+            botApiId = -rawId
+        } else {
+            botApiId = rawId
+        }
+        let idString = "\(botApiId)"
+        var sectionItems = items[.peerInfo] ?? []
+        var insertIndex = 0
+        for i in 0 ..< sectionItems.count {
+            if sectionItems[i] is PeerInfoScreenLabeledValueItem {
+                insertIndex = i + 1
+            }
+        }
+        sectionItems.insert(PeerInfoScreenLabeledValueItem(id: AnyHashable("ayuPeerId"), label: "ID", text: idString, textColor: .primary, action: { _, _ in
+            UIPasteboard.general.string = idString
+        }, requestLayout: { animated in
+            interaction.requestLayout(animated)
+        }), at: insertIndex)
+        items[.peerInfo] = sectionItems
+    }
+
     var result: [(AnyHashable, [PeerInfoScreenItem])] = []
     for section in InfoSection.allCases {
         if let sectionItems = items[section], !sectionItems.isEmpty {

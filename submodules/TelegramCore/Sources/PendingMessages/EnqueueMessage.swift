@@ -834,8 +834,20 @@ public func resendMessages(account: Account, messageIds: [MessageId]) -> Signal<
 
 func enqueueMessages(transaction: Transaction, account: Account, peerId: PeerId, messages: [(Bool, EnqueueMessage)], disableAutoremove: Bool = false, transformGroupingKeysWithPeerId: Bool = false) -> [MessageId?] {
     // AyuGram: a reply to a deleted (locally kept) message becomes a quote.
+    // AyuGram: in ghost mode, optionally send as scheduled a few seconds ahead so that
+    // sending does not make the account appear online.
+    let ayuScheduleTime: Int32? = ayuGhostScheduleTime(accountPeerId: account.peerId, peerId: peerId)
     let messages = messages.map { item -> (Bool, EnqueueMessage) in
-        return (item.0, ayuReplaceReplyToDeletedMessage(transaction: transaction, message: item.1))
+        var message = ayuReplaceReplyToDeletedMessage(transaction: transaction, message: item.1)
+        if let ayuScheduleTime = ayuScheduleTime {
+            message = message.withUpdatedAttributes { attributes in
+                if attributes.contains(where: { $0 is OutgoingScheduleInfoMessageAttribute || $0 is OutgoingQuickReplyMessageAttribute }) {
+                    return attributes
+                }
+                return attributes + [OutgoingScheduleInfoMessageAttribute(scheduleTime: ayuScheduleTime, repeatPeriod: nil)]
+            }
+        }
+        return (item.0, message)
     }
 
     /**

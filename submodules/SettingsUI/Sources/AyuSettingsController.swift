@@ -22,6 +22,10 @@ private enum AyuSettingsToggle: Int32 {
     case sendReadMessages
     case sendReadStories
     case readAfterSend
+    case sendAsScheduled
+    case showSeconds
+    case showPeerId
+    case hideStories
     case saveDeleted
     case saveEdits
     case saveSelfDestructing
@@ -39,6 +43,14 @@ private enum AyuSettingsToggle: Int32 {
             return "Отмечать истории просмотренными"
         case .readAfterSend:
             return "Читать при ответе"
+        case .sendAsScheduled:
+            return "Отправлять как отложенные"
+        case .showSeconds:
+            return "Секунды во времени сообщений"
+        case .showPeerId:
+            return "Показывать ID в профиле"
+        case .hideStories:
+            return "Скрывать ленту историй"
         case .saveSelfDestructing:
             return "Сохранять одноразовые фото и видео"
         case .hideAds:
@@ -62,6 +74,14 @@ private enum AyuSettingsToggle: Int32 {
             return AyuSettings.sendReadStories
         case .readAfterSend:
             return AyuSettings.markReadAfterSend
+        case .sendAsScheduled:
+            return AyuSettings.sendAsScheduledInGhostMode
+        case .showSeconds:
+            return AyuSettings.showMessageSeconds
+        case .showPeerId:
+            return AyuSettings.showPeerId
+        case .hideStories:
+            return AyuSettings.hideStories
         case .saveSelfDestructing:
             return AyuSettings.saveSelfDestructingMedia
         case .hideAds:
@@ -85,6 +105,14 @@ private enum AyuSettingsToggle: Int32 {
             AyuSettings.sendReadStories = value
         case .readAfterSend:
             AyuSettings.markReadAfterSend = value
+        case .sendAsScheduled:
+            AyuSettings.sendAsScheduledInGhostMode = value
+        case .showSeconds:
+            AyuSettings.showMessageSeconds = value
+        case .showPeerId:
+            AyuSettings.showPeerId = value
+        case .hideStories:
+            AyuSettings.hideStories = value
         case .saveSelfDestructing:
             AyuSettings.saveSelfDestructingMedia = value
         case .hideAds:
@@ -121,11 +149,11 @@ private enum AyuSettingsEntry: ItemListNodeEntry {
             return AyuSettingsSection.other.rawValue
         case let .toggle(toggle, _):
             switch toggle {
-            case .sendOnline, .sendTyping, .sendReadMessages, .sendReadStories, .readAfterSend:
+            case .sendOnline, .sendTyping, .sendReadMessages, .sendReadStories, .readAfterSend, .sendAsScheduled:
                 return AyuSettingsSection.ghost.rawValue
             case .saveDeleted, .saveEdits, .saveSelfDestructing:
                 return AyuSettingsSection.history.rawValue
-            case .hideAds:
+            case .hideAds, .showSeconds, .showPeerId, .hideStories:
                 return AyuSettingsSection.other.rawValue
             }
         }
@@ -147,6 +175,14 @@ private enum AyuSettingsEntry: ItemListNodeEntry {
                 return 4
             case .readAfterSend:
                 return 5
+            case .sendAsScheduled:
+                return 7
+            case .showSeconds:
+                return 22
+            case .showPeerId:
+                return 23
+            case .hideStories:
+                return 24
             case .saveSelfDestructing:
                 return 13
             case .hideAds:
@@ -157,7 +193,7 @@ private enum AyuSettingsEntry: ItemListNodeEntry {
                 return 12
             }
         case .ghostFooter:
-            return 6
+            return 8
         case .historyHeader:
             return 10
         case .historyFooter:
@@ -177,7 +213,7 @@ private enum AyuSettingsEntry: ItemListNodeEntry {
         case .ghostHeader:
             return ItemListSectionHeaderItem(presentationData: presentationData, text: "РЕЖИМ ПРИЗРАКА", sectionId: self.section)
         case .ghostFooter:
-            return ItemListTextItem(presentationData: presentationData, text: .plain("Выключенные пункты не отправляются на сервер. Прочитанное отмечается только у тебя. «Читать при ответе» отмечает чат прочитанным, когда ты сам туда пишешь. Кнопка 👻 в списке чатов включает и выключает режим призрака целиком."), sectionId: self.section)
+            return ItemListTextItem(presentationData: presentationData, text: .plain("Выключенные пункты не отправляются на сервер. Прочитанное отмечается только у тебя. «Читать при ответе» отмечает чат прочитанным, когда ты сам туда пишешь. «Отправлять как отложенные» — пока «в сети» выключено, сообщения уходят через 12 секунд как отложенные, чтобы отправка не показывала тебя в сети. Кнопка 👻 в списке чатов включает и выключает режим призрака целиком."), sectionId: self.section)
         case .historyHeader:
             return ItemListSectionHeaderItem(presentationData: presentationData, text: "ИСТОРИЯ СООБЩЕНИЙ", sectionId: self.section)
         case .otherHeader:
@@ -195,7 +231,7 @@ private enum AyuSettingsEntry: ItemListNodeEntry {
 private func ayuSettingsEntries() -> [AyuSettingsEntry] {
     var entries: [AyuSettingsEntry] = []
     entries.append(.ghostHeader)
-    for toggle in [AyuSettingsToggle.sendOnline, .sendTyping, .sendReadMessages, .sendReadStories, .readAfterSend] {
+    for toggle in [AyuSettingsToggle.sendOnline, .sendTyping, .sendReadMessages, .sendReadStories, .readAfterSend, .sendAsScheduled] {
         entries.append(.toggle(toggle, toggle.value))
     }
     entries.append(.ghostFooter)
@@ -205,7 +241,9 @@ private func ayuSettingsEntries() -> [AyuSettingsEntry] {
     }
     entries.append(.historyFooter)
     entries.append(.otherHeader)
-    entries.append(.toggle(.hideAds, AyuSettingsToggle.hideAds.value))
+    for toggle in [AyuSettingsToggle.hideAds, .showSeconds, .showPeerId, .hideStories] {
+        entries.append(.toggle(toggle, toggle.value))
+    }
     return entries
 }
 

@@ -71,6 +71,37 @@ public enum AyuSettings {
         set { defaults.set(newValue, forKey: "ayu.hideSponsoredMessages") }
     }
 
+    /// Show seconds in message timestamps.
+    public static var showMessageSeconds: Bool {
+        get { return bool("ayu.showMessageSeconds", default: false) }
+        set { defaults.set(newValue, forKey: "ayu.showMessageSeconds") }
+    }
+
+    /// Show the numeric id of users, groups and channels in their profile.
+    public static var showPeerId: Bool {
+        get { return bool("ayu.showPeerId", default: true) }
+        set { defaults.set(newValue, forKey: "ayu.showPeerId") }
+    }
+
+    /// Hide the stories bar above the chat list.
+    public static var hideStories: Bool {
+        get { return bool("ayu.hideStories", default: false) }
+        set { defaults.set(newValue, forKey: "ayu.hideStories") }
+    }
+
+    /// Hide messages of blocked users in groups.
+    public static var hideBlockedUsersMessages: Bool {
+        get { return bool("ayu.hideBlockedUsersMessages", default: false) }
+        set { defaults.set(newValue, forKey: "ayu.hideBlockedUsersMessages") }
+    }
+
+    /// In ghost mode, send messages as scheduled a few seconds ahead, so sending does not
+    /// make the account appear online.
+    public static var sendAsScheduledInGhostMode: Bool {
+        get { return bool("ayu.sendAsScheduledInGhostMode", default: false) }
+        set { defaults.set(newValue, forKey: "ayu.sendAsScheduledInGhostMode") }
+    }
+
     /// Keep messages that other people deleted.
     public static var saveDeletedMessages: Bool {
         get { return bool("ayu.saveDeletedMessages", default: true) }
@@ -233,6 +264,18 @@ func ayuKeepSelfDestructingMedia(previous: Message, media: [Media], attributes: 
     }
     let updatedAttributes = attributes.filter { !($0 is AutoremoveTimeoutMessageAttribute) && !($0 is AutoclearTimeoutMessageAttribute) }
     return (previous.media, updatedAttributes)
+}
+
+/// Schedule time for messages sent while online status is hidden, or nil to send normally.
+/// Not used for Saved Messages and secret chats (secret chats cannot schedule).
+func ayuGhostScheduleTime(accountPeerId: PeerId, peerId: PeerId) -> Int32? {
+    if AyuSettings.sendOnlinePackets || !AyuSettings.sendAsScheduledInGhostMode {
+        return nil
+    }
+    if peerId == accountPeerId || peerId.namespace == Namespaces.Peer.SecretChat {
+        return nil
+    }
+    return ayuCurrentTimestamp() + 12
 }
 
 /// A reply to a message that was deleted on the server (kept locally by AyuGram) cannot
