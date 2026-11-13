@@ -11,7 +11,13 @@ import SwiftSignalKit
 ///     ayu.storage.set("key", "value"); ayu.storage.get("key")
 ///     ayu.log("anything", 1, 2)
 ///
-/// `msg` has: text, peerId (string), id, date, authorId, authorName, chatTitle, outgoing.
+/// `msg` has: text, peerId (string), id, date, authorId, authorName, chatTitle, outgoing, mediaType.
+///
+/// Also: fetch(url, {method, headers, body}) -> Promise, setTimeout/setInterval/clear*, console.log,
+/// ayu.getHistory(peerId, limit) -> Promise<[msg]>, ayu.editMessage(peerId, id, text),
+/// ayu.deleteMessages(peerId, [ids], forEveryone), ayu.react(peerId, id, emoji),
+/// ayu.sendPhoto/sendFile/sendSticker(peerId, src, ...) -> Promise (src: http(s) URL, data: URL or base64),
+/// ayu.forwardMessages(fromPeerId, [ids], toPeerId).
 public final class AyuScripts: @unchecked Sendable {
     public struct Script: Codable, Equatable {
         public var id: String
@@ -22,7 +28,9 @@ public final class AyuScripts: @unchecked Sendable {
     public static let shared = AyuScripts()
 
     private let lock = NSRecursiveLock()
-    private let queue = Queue(name: "AyuScripts")
+    let dispatchQueue = DispatchQueue(label: "AyuScripts")
+    private var timers: [Int: DispatchSourceTimer] = [:]
+    private var nextTimerId = 1
     private var context: JSContext?
     private var outgoingHandlers: [JSValue] = []
     private var incomingHandlers: [JSValue] = []
@@ -122,7 +130,7 @@ public final class AyuScripts: @unchecked Sendable {
         self.logLines.removeAll()
     }
 
-    private func appendLog(_ line: String) {
+    func appendLog(_ line: String) {
         self.lock.lock()
         defer { self.lock.unlock() }
         let formatter = DateFormatter()
@@ -147,6 +155,10 @@ public final class AyuScripts: @unchecked Sendable {
         defer { self.lock.unlock() }
         self.outgoingHandlers.removeAll()
         self.incomingHandlers.removeAll()
+        for (_, timer) in self.timers {
+            timer.cancel()
+        }
+        self.timers.removeAll()
         self.context = nil
         self.isLoaded = true
 
@@ -161,6 +173,7 @@ public final class AyuScripts: @unchecked Sendable {
             self?.appendLog("Ошибка: \(exception?.toString() ?? "?")")
         }
         self.installApi(context: context)
+        let _ = context.evaluateScript(ayuScriptsPrelude, withSourceURL: URL(string: "ayu://prelude.js"))
         self.context = context
 
         for script in enabledScripts {
@@ -220,16 +233,18 @@ public final class AyuScripts: @unchecked Sendable {
             ayu.setObject(storage, forKeyedSubscript: "storage" as NSString)
         }
 
+        self.installExtendedApi(ayu: ayu)
         context.setObject(ayu, forKeyedSubscript: "ayu" as NSString)
     }
 
-    private func messageObject(_ message: Message) -> [String: Any] {
+    func scriptMessageObject(_ message: Message) -> [String: Any] {
         var result: [String: Any] = [
             "text": message.text,
             "peerId": "\(message.id.peerId.toInt64())",
             "id": Int(message.id.id),
             "date": Int(message.timestamp),
-            "outgoing": !message.flags.contains(.Incoming)
+            "outgoing": !message.flags.contains(.Incoming),
+            "mediaType": ayuMediaType(message.media)
         ]
         if let author = message.author {
             result["authorId"] = "\(author.id.toInt64())"
@@ -263,7 +278,7 @@ public final class AyuScripts: @unchecked Sendable {
 
     /// Incoming hook, called off the postbox queue with the newly received messages.
     func handleIncoming(_ messages: [Message]) {
-        self.queue.async {
+        self.dispatchQueue.async {
             self.lock.lock()
             defer { self.lock.unlock() }
             self.ensureLoaded()
@@ -271,7 +286,7 @@ public final class AyuScripts: @unchecked Sendable {
                 return
             }
             for message in messages {
-                let msg = self.messageObject(message)
+                let msg = self.scriptMessageObject(message)
                 for handler in self.incomingHandlers {
                     let _ = handler.call(withArguments: [msg])
                 }
@@ -286,6 +301,43 @@ public final class AyuScripts: @unchecked Sendable {
         return !self.incomingHandlers.isEmpty
     }
 
+    /// Calls a JavaScript callback later on the scripts queue, holding the engine lock.
+    func callBack(_ callback: JSValue, _ arguments: [Any]) {
+        self.dispatchQueue.async {
+            self.callNow(callback, arguments)
+        }
+    }
+    
+    /// Calls a JavaScript function now, holding the engine lock.
+    func callNow(_ function: JSValue, _ arguments: [Any]) {
+        self.lock.lock()
+        defer { self.lock.unlock() }
+        let _ = function.call(withArguments: arguments)
+    }
+    
+    func currentAccount() -> Account? {
+        self.lock.lock()
+        defer { self.lock.unlock() }
+        return self.account
+    }
+    
+    func storeTimer(_ timer: DispatchSourceTimer) -> Int {
+        self.lock.lock()
+        defer { self.lock.unlock() }
+        let id = self.nextTimerId
+        self.nextTimerId += 1
+        self.timers[id] = timer
+        return id
+    }
+    
+    func removeTimer(id: Int) {
+        self.lock.lock()
+        defer { self.lock.unlock() }
+        if let timer = self.timers.removeValue(forKey: id) {
+            timer.cancel()
+        }
+    }
+    
     private func sendMessage(peerIdString: String, text: String, replyToId: Int32?) {
         guard let account = self.account, let rawPeerId = Int64(peerIdString), !text.isEmpty else {
             self.appendLog("sendMessage: неверный peerId или пустой текст")

@@ -11,7 +11,12 @@ import AccountContext
 
 private let ayuExampleScript = """
 // Пример скрипта AyuGram.
-// Команды в исходящих: ".upper текст" и ".rev текст".
+// Команды в своих сообщениях:
+//   .upper текст    — заглавными
+//   .rev текст      — задом наперёд
+//   .btc            — курс биткоина (fetch)
+//   .last           — последние 5 сообщений чата в лог (getHistory)
+//   .del5           — отправить и удалить через 5 секунд (setTimeout + deleteMessages)
 ayu.onOutgoing(function (msg) {
     if (msg.text.startsWith(".upper ")) {
         return msg.text.slice(7).toUpperCase();
@@ -19,11 +24,33 @@ ayu.onOutgoing(function (msg) {
     if (msg.text.startsWith(".rev ")) {
         return msg.text.slice(5).split("").reverse().join("");
     }
+    if (msg.text === ".btc") {
+        fetch("https://api.coinbase.com/v2/prices/BTC-USD/spot")
+            .then(function (r) { return r.json(); })
+            .then(function (j) { ayu.sendMessage(msg.peerId, "BTC: $" + j.data.amount); })
+            .catch(function (e) { ayu.log("btc: " + e); });
+        return "⏳";
+    }
+    if (msg.text === ".last") {
+        ayu.getHistory(msg.peerId, 5).then(function (list) {
+            list.forEach(function (m) { ayu.log((m.authorName || "?") + ": " + m.text); });
+        });
+    }
+    if (msg.text.startsWith(".del5 ")) {
+        var text = msg.text.slice(6);
+        setTimeout(function () {
+            ayu.getHistory(msg.peerId, 5).then(function (list) {
+                var mine = list.filter(function (m) { return m.outgoing && m.text === text; });
+                if (mine.length > 0) { ayu.deleteMessages(msg.peerId, [mine[0].id], true); }
+            });
+        }, 5000);
+        return text;
+    }
 });
 
 // Все входящие пишутся в лог скриптов.
 ayu.onIncoming(function (msg) {
-    ayu.log((msg.authorName || "?") + " в " + (msg.chatTitle || "?") + ": " + msg.text);
+    console.log((msg.authorName || "?") + " в " + (msg.chatTitle || "?") + ": " + msg.text);
 });
 """
 
@@ -123,7 +150,7 @@ private enum AyuScriptsEntry: ItemListNodeEntry {
                 arguments.addExample()
             })
         case .addFooter:
-            return ItemListTextItem(presentationData: presentationData, text: .plain("API: ayu.onOutgoing(fn) — вернуть строку, чтобы заменить текст своего сообщения; ayu.onIncoming(fn) — каждое новое входящее; ayu.sendMessage(peerId, text, replyToId); ayu.storage.get/set; ayu.log(...). У msg есть text, peerId, id, date, authorId, authorName, chatTitle, outgoing."), sectionId: self.section)
+            return ItemListTextItem(presentationData: presentationData, text: .plain("Хуки: ayu.onOutgoing(fn) — вернуть строку, чтобы заменить текст своего сообщения; ayu.onIncoming(fn) — каждое новое входящее. Сообщения: ayu.sendMessage(peerId, text, replyToId), ayu.editMessage(peerId, id, text), ayu.deleteMessages(peerId, [ids], forEveryone), ayu.react(peerId, id, \"👍\"), ayu.forwardMessages(from, [ids], to), ayu.getHistory(peerId, limit) → Promise. Медиа (src: ссылка http(s), data: или base64): ayu.sendPhoto(peerId, src, caption), ayu.sendFile(peerId, src, fileName, caption), ayu.sendSticker(peerId, src) — webp. Ещё: fetch, setTimeout/setInterval, console.log, ayu.storage.get/set. У msg: text, peerId, id, date, authorId, authorName, chatTitle, outgoing, mediaType."), sectionId: self.section)
         case .log:
             return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: "Лог скриптов", kind: .generic, alignment: .natural, sectionId: self.section, style: .blocks, action: {
                 arguments.showLog()
