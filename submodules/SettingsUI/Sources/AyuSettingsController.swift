@@ -10,9 +10,11 @@ import AccountContext
 
 private final class AyuSettingsControllerArguments {
     let update: (AyuSettingsToggle, Bool) -> Void
+    let openScripts: () -> Void
 
-    init(update: @escaping (AyuSettingsToggle, Bool) -> Void) {
+    init(update: @escaping (AyuSettingsToggle, Bool) -> Void, openScripts: @escaping () -> Void) {
         self.update = update
+        self.openScripts = openScripts
     }
 }
 
@@ -126,6 +128,7 @@ private enum AyuSettingsToggle: Int32 {
 }
 
 private enum AyuSettingsSection: Int32 {
+    case scripts
     case ghost
     case history
     case other
@@ -138,6 +141,7 @@ private enum AyuSettingsEntry: ItemListNodeEntry {
     case historyHeader
     case historyFooter
     case otherHeader
+    case scripts
 
     var section: ItemListSectionId {
         switch self {
@@ -147,6 +151,8 @@ private enum AyuSettingsEntry: ItemListNodeEntry {
             return AyuSettingsSection.history.rawValue
         case .otherHeader:
             return AyuSettingsSection.other.rawValue
+        case .scripts:
+            return AyuSettingsSection.scripts.rawValue
         case let .toggle(toggle, _):
             switch toggle {
             case .sendOnline, .sendTyping, .sendReadMessages, .sendReadStories, .readAfterSend, .sendAsScheduled:
@@ -200,6 +206,8 @@ private enum AyuSettingsEntry: ItemListNodeEntry {
             return 14
         case .otherHeader:
             return 20
+        case .scripts:
+            return -1
         }
     }
 
@@ -216,6 +224,10 @@ private enum AyuSettingsEntry: ItemListNodeEntry {
             return ItemListTextItem(presentationData: presentationData, text: .plain("Выключенные пункты не отправляются на сервер. Прочитанное отмечается только у тебя. «Читать при ответе» отмечает чат прочитанным, когда ты сам туда пишешь. «Отправлять как отложенные» — пока «в сети» выключено, сообщения уходят через 12 секунд как отложенные, чтобы отправка не показывала тебя в сети. Кнопка 👻 в списке чатов включает и выключает режим призрака целиком."), sectionId: self.section)
         case .historyHeader:
             return ItemListSectionHeaderItem(presentationData: presentationData, text: "ИСТОРИЯ СООБЩЕНИЙ", sectionId: self.section)
+        case .scripts:
+            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, title: "Скрипты", label: "\(AyuScripts.shared.scripts().filter({ $0.enabled }).count)", sectionId: self.section, style: .blocks, action: {
+                arguments.openScripts()
+            })
         case .otherHeader:
             return ItemListSectionHeaderItem(presentationData: presentationData, text: "ПРОЧЕЕ", sectionId: self.section)
         case .historyFooter:
@@ -230,6 +242,7 @@ private enum AyuSettingsEntry: ItemListNodeEntry {
 
 private func ayuSettingsEntries() -> [AyuSettingsEntry] {
     var entries: [AyuSettingsEntry] = []
+    entries.append(.scripts)
     entries.append(.ghostHeader)
     for toggle in [AyuSettingsToggle.sendOnline, .sendTyping, .sendReadMessages, .sendReadStories, .readAfterSend, .sendAsScheduled] {
         entries.append(.toggle(toggle, toggle.value))
@@ -251,10 +264,13 @@ public func ayuSettingsController(context: AccountContext) -> ViewController {
     let revision = ValuePromise<Int>(0, ignoreRepeated: false)
     var currentRevision = 0
 
+    var pushImpl: ((ViewController) -> Void)?
     let arguments = AyuSettingsControllerArguments(update: { toggle, value in
         toggle.set(value)
         currentRevision += 1
         revision.set(currentRevision)
+    }, openScripts: {
+        pushImpl?(ayuScriptsController(context: context))
     })
 
     let signal = combineLatest(queue: .mainQueue(),
@@ -268,5 +284,8 @@ public func ayuSettingsController(context: AccountContext) -> ViewController {
     }
 
     let controller = ItemListController(context: context, state: signal)
+    pushImpl = { [weak controller] c in
+        controller?.push(c)
+    }
     return controller
 }

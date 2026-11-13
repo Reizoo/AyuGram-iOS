@@ -1227,9 +1227,18 @@ public final class AccountStateManager {
                     let _ = self.delayNotificatonsUntil.swap(events.delayNotificatonsUntil)
                 }
                 
+                if !events.addedIncomingMessageIds.isEmpty && AyuScripts.shared.hasIncomingHandlers {
+                    let ayuIncomingIds = events.addedIncomingMessageIds
+                    let _ = (self.postbox.transaction { transaction -> [Message] in
+                        return ayuIncomingIds.compactMap { transaction.getMessage($0) }
+                    }).start(next: { messages in
+                        AyuScripts.shared.handleIncoming(messages)
+                    })
+                }
+
                 let signal = self.postbox.transaction { transaction -> [([Message], PeerGroupId, Bool, MessageHistoryThreadData?)] in
                     var messageList: [([Message], PeerGroupId, Bool, MessageHistoryThreadData?)] = []
-                    
+
                     for id in events.addedIncomingMessageIds {
                         let (messages, notify, _, _, threadData) = messagesForNotification(transaction: transaction, id: id, alwaysReturnMessage: false)
                         if !messages.isEmpty {

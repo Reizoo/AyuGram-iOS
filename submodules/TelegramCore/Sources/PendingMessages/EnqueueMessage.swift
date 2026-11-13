@@ -839,6 +839,10 @@ func enqueueMessages(transaction: Transaction, account: Account, peerId: PeerId,
     let ayuScheduleTime: Int32? = ayuGhostScheduleTime(accountPeerId: account.peerId, peerId: peerId)
     let messages = messages.map { item -> (Bool, EnqueueMessage) in
         var message = ayuReplaceReplyToDeletedMessage(transaction: transaction, message: item.1)
+        // AyuGram user scripts may rewrite the text (entities are dropped when they do).
+        if case let .message(text, attributes, inlineStickers, mediaReference, threadId, replyToMessageId, replyToStoryId, localGroupingKey, correlationId, bubbleUpEmojiOrStickersets) = message, let scriptText = AyuScripts.shared.transformOutgoing(text: text, peerId: peerId), scriptText != text {
+            message = .message(text: scriptText, attributes: attributes.filter { !($0 is TextEntitiesMessageAttribute) }, inlineStickers: inlineStickers, mediaReference: mediaReference, threadId: threadId, replyToMessageId: replyToMessageId, replyToStoryId: replyToStoryId, localGroupingKey: localGroupingKey, correlationId: correlationId, bubbleUpEmojiOrStickersets: bubbleUpEmojiOrStickersets)
+        }
         if let ayuScheduleTime = ayuScheduleTime {
             message = message.withUpdatedAttributes { attributes in
                 if attributes.contains(where: { $0 is OutgoingScheduleInfoMessageAttribute || $0 is OutgoingQuickReplyMessageAttribute }) {
