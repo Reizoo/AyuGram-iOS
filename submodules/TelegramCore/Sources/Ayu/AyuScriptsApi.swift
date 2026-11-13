@@ -159,6 +159,11 @@ extension AyuScripts {
             self?.scriptForwardMessages(fromPeerIdString: fromPeerIdString, ids: ayuJSIntList(ids), toPeerIdString: toPeerIdString)
         }
         ayu.setObject(unsafeBitCast(forwardMessages, to: AnyObject.self), forKeyedSubscript: "forwardMessages" as NSString)
+        
+        let scheduleMessage: @convention(block) (String, String, Double) -> Void = { [weak self] peerIdString, text, time in
+            self?.scriptScheduleMessage(peerIdString: peerIdString, text: text, time: Int32(clamping: Int64(time)))
+        }
+        ayu.setObject(unsafeBitCast(scheduleMessage, to: AnyObject.self), forKeyedSubscript: "scheduleMessage" as NSString)
     }
 
     private func parsePeerId(_ string: String) -> PeerId? {
@@ -335,6 +340,16 @@ extension AyuScripts {
         let _ = enqueueMessages(account: account, peerId: toPeerId, messages: messages).start()
     }
 
+    /// Sends a message as scheduled for `time` (unix seconds): the server delivers it even when
+    /// the app is not running.
+    private func scriptScheduleMessage(peerIdString: String, text: String, time: Int32) {
+        guard let account = self.currentAccount(), let peerId = self.parsePeerId(peerIdString), !text.isEmpty else {
+            return
+        }
+        let attributes: [MessageAttribute] = [OutgoingScheduleInfoMessageAttribute(scheduleTime: time, repeatPeriod: nil)]
+        let _ = enqueueMessages(account: account, peerId: peerId, messages: [.message(text: text, attributes: attributes, inlineStickers: [:], mediaReference: nil, threadId: nil, replyToMessageId: nil, replyToStoryId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: [])]).start()
+    }
+    
     private func scriptSendMedia(peerIdString: String, options: JSValue, callback: JSValue) {
         guard let account = self.currentAccount(), let peerId = self.parsePeerId(peerIdString) else {
             self.callBack(callback, ["нет аккаунта или неверный peerId"])
