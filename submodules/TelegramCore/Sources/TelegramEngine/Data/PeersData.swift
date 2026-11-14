@@ -2391,6 +2391,9 @@ public extension TelegramEngine.EngineData.Item {
                 guard let peer = peerViewMainPeer(view) else {
                     return false
                 }
+                if AyuSettings.saveRestrictedContent {
+                    return false
+                }
                 if let cachedPeerData = view.cachedData as? CachedUserData {
                     return cachedPeerData.flags.contains(.copyProtectionEnabled)
                 } else if let group = peer as? TelegramGroup {
@@ -2423,7 +2426,9 @@ public extension TelegramEngine.EngineData.Item {
                 guard let view = view as? CachedPeerDataView else {
                     preconditionFailure()
                 }
-                if let cachedData = view.cachedPeerData as? CachedUserData {
+                if AyuSettings.saveRestrictedContent {
+                    return false
+                } else if let cachedData = view.cachedPeerData as? CachedUserData {
                     return cachedData.flags.contains(.myCopyProtectionEnabled)
                 } else {
                     return false

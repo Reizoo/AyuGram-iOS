@@ -31,6 +31,7 @@ private enum AyuSettingsToggle: Int32 {
     case saveDeleted
     case saveEdits
     case saveSelfDestructing
+    case saveRestricted
     case hideAds
 
     var title: String {
@@ -55,6 +56,8 @@ private enum AyuSettingsToggle: Int32 {
             return "Скрывать ленту историй"
         case .saveSelfDestructing:
             return "Сохранять одноразовые фото и видео"
+        case .saveRestricted:
+            return "Обходить запрет копирования и скриншотов"
         case .hideAds:
             return "Скрывать рекламу в каналах"
         case .saveDeleted:
@@ -86,6 +89,8 @@ private enum AyuSettingsToggle: Int32 {
             return AyuSettings.hideStories
         case .saveSelfDestructing:
             return AyuSettings.saveSelfDestructingMedia
+        case .saveRestricted:
+            return AyuSettings.saveRestrictedContent
         case .hideAds:
             return AyuSettings.hideSponsoredMessages
         case .saveDeleted:
@@ -117,6 +122,8 @@ private enum AyuSettingsToggle: Int32 {
             AyuSettings.hideStories = value
         case .saveSelfDestructing:
             AyuSettings.saveSelfDestructingMedia = value
+        case .saveRestricted:
+            AyuSettings.saveRestrictedContent = value
         case .hideAds:
             AyuSettings.hideSponsoredMessages = value
         case .saveDeleted:
@@ -157,7 +164,7 @@ private enum AyuSettingsEntry: ItemListNodeEntry {
             switch toggle {
             case .sendOnline, .sendTyping, .sendReadMessages, .sendReadStories, .readAfterSend, .sendAsScheduled:
                 return AyuSettingsSection.ghost.rawValue
-            case .saveDeleted, .saveEdits, .saveSelfDestructing:
+            case .saveDeleted, .saveEdits, .saveSelfDestructing, .saveRestricted:
                 return AyuSettingsSection.history.rawValue
             case .hideAds, .showSeconds, .showPeerId, .hideStories:
                 return AyuSettingsSection.other.rawValue
@@ -191,6 +198,8 @@ private enum AyuSettingsEntry: ItemListNodeEntry {
                 return 24
             case .saveSelfDestructing:
                 return 13
+            case .saveRestricted:
+                return 14
             case .hideAds:
                 return 21
             case .saveDeleted:
@@ -203,7 +212,7 @@ private enum AyuSettingsEntry: ItemListNodeEntry {
         case .historyHeader:
             return 10
         case .historyFooter:
-            return 14
+            return 15
         case .otherHeader:
             return 20
         case .scripts:
@@ -231,7 +240,7 @@ private enum AyuSettingsEntry: ItemListNodeEntry {
         case .otherHeader:
             return ItemListSectionHeaderItem(presentationData: presentationData, text: "ПРОЧЕЕ", sectionId: self.section)
         case .historyFooter:
-            return ItemListTextItem(presentationData: presentationData, text: .plain("Удалённые сообщения остаются в чате с пометкой 🗑. Старые версии правок — в меню сообщения → «История правок»."), sectionId: self.section)
+            return ItemListTextItem(presentationData: presentationData, text: .plain("Удалённые сообщения остаются в чате с пометкой 🗑. Старые версии правок — в меню сообщения → «История правок». Обход запрета: в защищённых чатах можно копировать, сохранять, пересылать (уходит копией без автора) и скринить; одноразовые сохраняются через меню сообщения; о скриншотах собеседнику не сообщается."), sectionId: self.section)
         case let .toggle(toggle, value):
             return ItemListSwitchItem(presentationData: presentationData, systemStyle: .glass, title: toggle.title, value: value, sectionId: self.section, style: .blocks, updated: { value in
                 arguments.update(toggle, value)
@@ -249,7 +258,7 @@ private func ayuSettingsEntries() -> [AyuSettingsEntry] {
     }
     entries.append(.ghostFooter)
     entries.append(.historyHeader)
-    for toggle in [AyuSettingsToggle.saveDeleted, .saveEdits, .saveSelfDestructing] {
+    for toggle in [AyuSettingsToggle.saveDeleted, .saveEdits, .saveSelfDestructing, .saveRestricted] {
         entries.append(.toggle(toggle, toggle.value))
     }
     entries.append(.historyFooter)

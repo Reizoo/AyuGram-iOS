@@ -1503,15 +1503,17 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
             }
         }
         
-        if resourceAvailable, !message.containsSecretMedia && !isCopyProtected {
+        // AyuGram: view-once and timer media can be saved too; saving fetches it if needed.
+        let ayuSaveSecretMedia = message.containsSecretMedia && AyuSettings.saveRestrictedContent
+        if resourceAvailable || ayuSaveSecretMedia, !message.containsSecretMedia || ayuSaveSecretMedia, !isCopyProtected {
             var mediaReference: AnyMediaReference?
             var isVideo = false
             for media in message.effectiveMedia {
                 if let image = media as? TelegramMediaImage, let _ = largestImageRepresentation(image.representations) {
-                    mediaReference = ImageMediaReference.standalone(media: image).abstract
+                    mediaReference = ayuSaveSecretMedia ? ImageMediaReference.message(message: MessageReference(message), media: image).abstract : ImageMediaReference.standalone(media: image).abstract
                     break
                 } else if let file = media as? TelegramMediaFile, file.isVideo {
-                    mediaReference = FileMediaReference.standalone(media: file).abstract
+                    mediaReference = ayuSaveSecretMedia ? FileMediaReference.message(message: MessageReference(message), media: file).abstract : FileMediaReference.standalone(media: file).abstract
                     isVideo = true
                     break
                 }

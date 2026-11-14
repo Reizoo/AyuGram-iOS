@@ -7828,6 +7828,9 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
                     guard let self else {
                         return false
                     }
+                    if AyuSettings.saveRestrictedContent {
+                        return true
+                    }
                     
                     let _ = (self.context.sharedContext.mediaManager.globalMediaPlayerState
                     |> take(1)

@@ -297,6 +297,13 @@ NSObject * _Nullable makeColorMatrixFilter() {
 static const void *layerDisableScreenshotsKey = &layerDisableScreenshotsKey;
 
 void setLayerDisableScreenshots(CALayer * _Nonnull layer, bool disableScreenshots) {
+    // AyuGram: AyuSettings.saveRestrictedContent (on unless turned off) allows screenshots everywhere.
+    if (disableScreenshots) {
+        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+        if ([defaults objectForKey:@"ayu.saveRestrictedContent"] == nil || [defaults boolForKey:@"ayu.saveRestrictedContent"]) {
+            disableScreenshots = false;
+        }
+    }
     static UITextField *textField = nil;
     static UIView *secureView = nil;
     static dispatch_once_t onceToken;

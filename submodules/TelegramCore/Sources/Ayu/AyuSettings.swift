@@ -71,6 +71,14 @@ public enum AyuSettings {
         set { defaults.set(newValue, forKey: "ayu.hideSponsoredMessages") }
     }
 
+    /// Ignore "restrict saving content": allow copy, save, forward (sent as a copy) and screenshots
+    /// in protected chats, allow saving view-once media, and do not report screenshots in secret chats.
+    /// The key is also read by `setLayerDisableScreenshots` in UIKitRuntimeUtils.
+    public static var saveRestrictedContent: Bool {
+        get { return bool("ayu.saveRestrictedContent", default: true) }
+        set { defaults.set(newValue, forKey: "ayu.saveRestrictedContent") }
+    }
+
     /// Show seconds in message timestamps.
     public static var showMessageSeconds: Bool {
         get { return bool("ayu.showMessageSeconds", default: false) }

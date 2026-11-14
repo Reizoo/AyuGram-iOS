@@ -252,6 +252,9 @@ public extension Peer {
     }
     
     var isCopyProtectionEnabled: Bool {
+        if AyuSettings.saveRestrictedContent {
+            return false
+        }
         switch self {
         case let group as TelegramGroup:
             return group.flags.contains(.copyProtectionEnabled)
