@@ -46,6 +46,9 @@ let ayuScriptsPrelude = """
     };
     ayu.getHistory = promisify(ayu._getHistory);
     ayu.sendMedia = promisify(ayu._sendMedia);
+    ayu.clearScheduled = function (peerId, text) {
+        return promisify(ayu._clearScheduled)(String(peerId), text == null ? "" : String(text));
+    };
     ayu.sendPhoto = function (peerId, src, caption, replyTo) {
         return ayu.sendMedia(peerId, { src: src, type: "photo", caption: caption || "", replyTo: replyTo });
     };
@@ -164,6 +167,11 @@ extension AyuScripts {
             self?.scriptScheduleMessage(peerIdString: peerIdString, text: text, time: Int32(clamping: Int64(time)))
         }
         ayu.setObject(unsafeBitCast(scheduleMessage, to: AnyObject.self), forKeyedSubscript: "scheduleMessage" as NSString)
+
+        let clearScheduled: @convention(block) (String, String, JSValue) -> Void = { [weak self] peerIdString, text, callback in
+            self?.scriptClearScheduled(peerIdString: peerIdString, text: text, callback: callback)
+        }
+        ayu.setObject(unsafeBitCast(clearScheduled, to: AnyObject.self), forKeyedSubscript: "_clearScheduled" as NSString)
     }
 
     private func parsePeerId(_ string: String) -> PeerId? {
@@ -349,7 +357,77 @@ extension AyuScripts {
         let attributes: [MessageAttribute] = [OutgoingScheduleInfoMessageAttribute(scheduleTime: time, repeatPeriod: nil)]
         let _ = enqueueMessages(account: account, peerId: peerId, messages: [.message(text: text, attributes: attributes, inlineStickers: [:], mediaReference: nil, threadId: nil, replyToMessageId: nil, replyToStoryId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: [])]).start()
     }
-    
+
+    /// Deletes the scheduled messages of a chat, all of them or only those whose text equals `text`
+    /// (an empty `text` matches every message). The list comes from the server, so messages
+    /// scheduled from another device or before a reinstall are found too. Calls back with the count.
+    private func scriptClearScheduled(peerIdString: String, text: String, callback: JSValue) {
+        guard let account = self.currentAccount(), let peerId = self.parsePeerId(peerIdString) else {
+            self.callBack(callback, ["нет аккаунта или неверный peerId"])
+            return
+        }
+        let network = account.network
+        let _ = (account.postbox.transaction { transaction -> Peer? in
+            return transaction.getPeer(peerId)
+        }
+        |> mapToSignal { peer -> Signal<[MessageId]?, NoError> in
+            guard let peer = peer, let inputPeer = apiInputPeer(peer) else {
+                return .single(nil)
+            }
+            return network.request(Api.functions.messages.getScheduledHistory(peer: inputPeer, hash: 0))
+            |> map(Optional.init)
+            |> `catch` { _ -> Signal<Api.messages.Messages?, NoError> in
+                return .single(nil)
+            }
+            |> map { result -> [MessageId]? in
+                guard let result = result else {
+                    return nil
+                }
+                let apiMessages: [Api.Message]
+                switch result {
+                case let .messages(messagesData):
+                    apiMessages = messagesData.messages
+                case let .messagesSlice(messagesSliceData):
+                    apiMessages = messagesSliceData.messages
+                case let .channelMessages(channelMessagesData):
+                    apiMessages = channelMessagesData.messages
+                case .messagesNotModified:
+                    return []
+                }
+                var ids: [MessageId] = []
+                for apiMessage in apiMessages {
+                    guard let storeMessage = StoreMessage(apiMessage: apiMessage, accountPeerId: account.peerId, peerIsForum: peer.isForum, namespace: Namespaces.Message.ScheduledCloud), case let .Id(id) = storeMessage.id else {
+                        continue
+                    }
+                    if text.isEmpty || storeMessage.text.trimmingCharacters(in: .whitespacesAndNewlines) == text {
+                        ids.append(id)
+                    }
+                }
+                return ids
+            }
+        }
+        |> mapToSignal { ids -> Signal<[MessageId]?, NoError> in
+            guard let ids = ids, !ids.isEmpty else {
+                return .single(ids)
+            }
+            return _internal_deleteMessagesInteractively(account: account, messageIds: ids, type: .forEveryone)
+            |> then(.single(Void()))
+            |> map { _ -> [MessageId]? in
+                return ids
+            }
+            |> take(1)
+        }).start(next: { [weak self] ids in
+            guard let self = self else {
+                return
+            }
+            if let ids = ids {
+                self.callBack(callback, [NSNull(), ids.count])
+            } else {
+                self.callBack(callback, ["не удалось получить отложенные сообщения"])
+            }
+        })
+    }
+
     private func scriptSendMedia(peerIdString: String, options: JSValue, callback: JSValue) {
         guard let account = self.currentAccount(), let peerId = self.parsePeerId(peerIdString) else {
             self.callBack(callback, ["нет аккаунта или неверный peerId"])

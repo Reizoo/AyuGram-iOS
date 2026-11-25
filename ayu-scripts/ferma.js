@@ -6,8 +6,9 @@
 //
 // Включить: открой нужный чат и отправь туда  .ферма вкл
 //           (команда сама превратится в первую «ферма»).
-// Выключить: выключи этот скрипт в Настройки → AyuGram → Скрипты,
-//           потом в чате открой «Отложенные сообщения» и удали оставшиеся.
+// Выключить: в том же чате отправь  .ферма выкл
+//           (скрипт перестанет планировать и удалит все отложенные «ферма» в этом чате).
+//           Нужна сборка AyuGram с ayu.clearScheduled.
 
 var TEXT = "ферма";
 var INTERVAL = 4 * 60 * 60;   // 4 часа, в секундах
@@ -46,12 +47,39 @@ function topUp() {
     }
 }
 
+function turnOff(peerId) {
+    ayu.storage.set("ferma.peerId", "");
+    ayu.storage.set("ferma.last", "");
+    ayu.clearScheduled(peerId, TEXT).then(function (count) {
+        ayu.log("ферма: выключена, удалено отложенных: " + count);
+    }, function (err) {
+        ayu.log("ферма: выключена, но удалить отложенные не вышло: " + err.message);
+    });
+}
+
 ayu.onOutgoing(function (msg) {
-    if (msg.text.trim().toLowerCase() === ".ферма вкл") {
+    var command = msg.text.trim().toLowerCase();
+    if (command === ".ферма вкл") {
         ayu.storage.set("ferma.peerId", msg.peerId);
         ayu.storage.set("ferma.last", String(now()));
         setTimeout(topUp, 2000);
         return TEXT;
+    }
+    if (command === ".ферма выкл") {
+        var peerId = ayu.storage.get("ferma.peerId") || msg.peerId;
+        // Хук вызывается во время отправки, поэтому остальное делаем вне его.
+        setTimeout(function () { turnOff(peerId); }, 0);
+        // Сама команда уходит обычным сообщением: через 10 секунд находим её и удаляем у всех.
+        setTimeout(function () {
+            ayu.getHistory(msg.peerId, 10).then(function (messages) {
+                var ids = messages.filter(function (m) {
+                    return m.outgoing && m.text.trim().toLowerCase() === ".ферма выкл";
+                }).map(function (m) { return m.id; });
+                if (ids.length > 0) {
+                    ayu.deleteMessages(msg.peerId, ids, true);
+                }
+            });
+        }, 10000);
     }
 });
 
