@@ -3,7 +3,6 @@ import UIKit
 import Display
 import AsyncDisplayKit
 import SwiftSignalKit
-import Postbox
 import TelegramCore
 import TelegramPresentationData
 import TelegramUIPreferences
@@ -392,7 +391,7 @@ public func storageUsageExceptionsScreen(
                 }, action: { _, f in
                     applyValue(value)
                     f(.default)
-                })))
+                }, accessibilityIsSelected: currentValue == value)))
             }
             
             subItems.append(.separator)

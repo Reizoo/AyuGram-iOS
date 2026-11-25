@@ -1,5 +1,4 @@
 import Foundation
-import LottieSettings
 import UIKit
 import AppBundle
 import Display
@@ -17,6 +16,7 @@ import ContextUI
 import ComponentFlow
 import ViewControllerComponent
 import ChatListHeaderComponent
+import NavigationBarComponent
 import GlassBackgroundComponent
 import SearchBarNode
 import QrCodeUI
@@ -27,10 +27,34 @@ import UndoUI
 import WalletContext
 import WalletSendScreen
 import SideColumnLayout
+import ContactListUI
 
 public enum WalletPeerSelectionScreenMode: Equatable {
     case transfer
     case collectible(WalletContext.Collectible)
+}
+
+public func walletMoveActionIcon(_ name: String) -> UIImage? {
+    guard let glyph = generateTintedImage(image: UIImage(bundleImageName: name), color: .white) else {
+        return nil
+    }
+    let size = CGSize(width: 40.0, height: 40.0)
+    return generateImage(size, contextGenerator: { size, context in
+        context.clear(CGRect(origin: .zero, size: size))
+        context.addEllipse(in: CGRect(origin: .zero, size: size))
+        context.clip()
+        let colors = [UIColor(rgb: 0x72d5fd).cgColor, UIColor(rgb: 0x2a9ef1).cgColor] as CFArray
+        var locations: [CGFloat] = [0.0, 1.0]
+        if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: &locations) {
+            context.drawLinearGradient(gradient, start: CGPoint(x: 0.0, y: size.height), end: CGPoint(x: 0.0, y: 0.0), options: [])
+        }
+        context.resetClip()
+        let glyphSize = CGSize(width: 30.0, height: 30.0)
+        let glyphFrame = CGRect(origin: CGPoint(x: (size.width - glyphSize.width) / 2.0, y: (size.height - glyphSize.height) / 2.0), size: glyphSize)
+        if let cgImage = glyph.cgImage {
+            context.draw(cgImage, in: glyphFrame)
+        }
+    })
 }
 
 func walletPeerSelectionIsEligiblePeer(_ peer: EnginePeer, accountPeerId: EnginePeer.Id) -> Bool {
@@ -248,6 +272,7 @@ private final class WalletPeerSelectionScreenComponent: Component {
     let dismissSourceScreen: () -> Void
     let transferAnimation: WalletSendTransferAnimation?
     let returnedToWallet: (() -> Void)?
+    let moveToGifts: (() -> Void)?
 
     init(
         context: AccountContext,
@@ -256,7 +281,8 @@ private final class WalletPeerSelectionScreenComponent: Component {
         mode: WalletPeerSelectionScreenMode,
         dismissSourceScreen: @escaping () -> Void,
         transferAnimation: WalletSendTransferAnimation?,
-        returnedToWallet: (() -> Void)?
+        returnedToWallet: (() -> Void)?,
+        moveToGifts: (() -> Void)?
     ) {
         self.context = context
         self.updatedPresentationData = updatedPresentationData
@@ -265,6 +291,7 @@ private final class WalletPeerSelectionScreenComponent: Component {
         self.dismissSourceScreen = dismissSourceScreen
         self.transferAnimation = transferAnimation
         self.returnedToWallet = returnedToWallet
+        self.moveToGifts = moveToGifts
     }
 
     static func ==(lhs: WalletPeerSelectionScreenComponent, rhs: WalletPeerSelectionScreenComponent) -> Bool {
@@ -273,6 +300,7 @@ private final class WalletPeerSelectionScreenComponent: Component {
             && lhs.updatedPresentationData.signal === rhs.updatedPresentationData.signal
             && lhs.walletContext === rhs.walletContext
             && lhs.mode == rhs.mode
+            && (lhs.moveToGifts == nil) == (rhs.moveToGifts == nil)
     }
 
     private struct PeerInfo: Equatable {
@@ -289,12 +317,15 @@ private final class WalletPeerSelectionScreenComponent: Component {
 
     private enum ContentEntry: Comparable, Identifiable {
         enum Id: Hashable {
+            case moveToGifts
             case topPeers
             case peer(EnginePeer.Id)
         }
 
         var stableId: Id {
             switch self {
+            case .moveToGifts:
+                return .moveToGifts
             case .topPeers:
                 return .topPeers
             case let .peer(peer, _, _, _, _):
@@ -302,11 +333,18 @@ private final class WalletPeerSelectionScreenComponent: Component {
             }
         }
 
+        case moveToGifts(title: String)
         case topPeers
         case peer(peer: EnginePeer, presence: EnginePeer.Presence?, sortIndex: Int, section: PeerSection = .none, query: String? = nil)
 
         static func <(lhs: ContentEntry, rhs: ContentEntry) -> Bool {
             switch (lhs, rhs) {
+            case (.moveToGifts, .moveToGifts):
+                return false
+            case (.moveToGifts, _):
+                return true
+            case (_, .moveToGifts):
+                return false
             case (.topPeers, .topPeers):
                 return false
             case (.topPeers, _):
@@ -323,6 +361,20 @@ private final class WalletPeerSelectionScreenComponent: Component {
 
         func item(listNode: ContentListNode) -> ListViewItem {
             switch self {
+            case let .moveToGifts(title):
+                return ContactListActionItem(
+                    presentationData: ItemListPresentationData(listNode.presentationData),
+                    systemStyle: .glass,
+                    title: title,
+                    icon: .generic(walletMoveActionIcon("Wallet/MoveToGifts")!),
+                    actionStyle: .generic,
+                    height: .tall,
+                    hideBackground: true,
+                    header: nil,
+                    action: { [weak listNode] in
+                        listNode?.parentView?.moveToGiftsSelected()
+                    }
+                )
             case .topPeers:
                 return WalletPeerSelectionTopPeersItem(context: listNode.context, presentationData: listNode.presentationData, peerSelected: { [weak listNode] peer in
                     listNode?.parentView?.peerSelected(peer: peer)
@@ -479,6 +531,11 @@ private final class WalletPeerSelectionScreenComponent: Component {
         private let suggestionsContainerView = UIView()
         private let navigationGlassContainer = GlassBackgroundContainerView()
         private let navigationBarView = ComponentView<Empty>()
+
+        /// The chat-list-style header, for navigation transitions.
+        var navigationTransitionHeader: ChatListNavigationBar.View? {
+            return self.navigationBarView.view as? ChatListNavigationBar.View
+        }
         private var navigationHeight: CGFloat?
         private var searchBarNode: SearchBarNode?
         private var activeSearch: ChatListNavigationBar.ActiveSearch?
@@ -543,6 +600,16 @@ private final class WalletPeerSelectionScreenComponent: Component {
             )
         }
 
+        /// VoiceOver: the bar (title, Close, the address field, Scan QR Code) before the content under it (it is drawn
+        /// over the list, which starts at the top of the screen).
+        override var accessibilityElements: [Any]? {
+            get {
+                let visible = self.subviews.filter { !$0.isHidden && $0.alpha >= 0.01 && !$0.accessibilityElementsHidden }
+                return visible.filter { $0 === self.navigationGlassContainer } + visible.filter { $0 !== self.navigationGlassContainer }
+            } set(value) {
+            }
+        }
+        
         override init(frame: CGRect) {
             super.init(frame: frame)
 
@@ -925,6 +992,10 @@ private final class WalletPeerSelectionScreenComponent: Component {
             }
         }
 
+        func moveToGiftsSelected() {
+            self.component?.moveToGifts?()
+        }
+
         func peerSelected(peer: EnginePeer) {
             guard let component = self.component,
                   self.resolvingPeerId == nil else {
@@ -1212,7 +1283,6 @@ private final class WalletPeerSelectionScreenComponent: Component {
         ) -> CGFloat {
             let headerContent = ChatListHeaderComponent.Content(
                 title: "",
-                navigationBackTitle: nil,
                 titleComponent: AnyComponent(MultilineTextComponent(
                     text: .plain(NSAttributedString(
                         string: strings.Wallet_Recipient_Title,
@@ -1222,12 +1292,12 @@ private final class WalletPeerSelectionScreenComponent: Component {
                     maximumNumberOfLines: 1
                 )),
                 chatListTitle: nil,
-                leftButton: isModal ? AnyComponentWithIdentity(id: "close", component: AnyComponent(NavigationButtonComponent(
+                leftButton: isModal ? NavigationBarComponent.Button(id: "close",
                     content: .icon(imageName: "Navigation/Close"),
-                    pressed: { [weak self] _ in
+                    action: { [weak self] _ in
                         self?.environment?.controller()?.dismiss()
                     }
-                ))) : nil,
+                ) : nil,
                 rightButtons: [],
                 backPressed: isModal ? nil : { [weak self] in
                     self?.environment?.controller()?.dismiss()
@@ -1665,6 +1735,9 @@ private final class WalletPeerSelectionScreenComponent: Component {
 
             var entries: [ContentEntry] = []
             var peerIds = Set<EnginePeer.Id>()
+            if component.moveToGifts != nil && self.query.isEmpty && self.recipientPeer == nil {
+                entries.append(.moveToGifts(title: environment.strings.Gift_Transfer_MoveToGifts))
+            }
             if let recipientPeer = self.recipientPeer?.peer {
                 peerIds.insert(recipientPeer.id)
                 entries.append(.peer(
@@ -1869,8 +1942,7 @@ private final class WalletPeerSelectionScreenComponent: Component {
                     transition: .immediate,
                     component: AnyComponent(LottieComponent(
                         content: LottieComponent.AppBundleContent(name: displaysEmptyRecentPeers ? "Loupe" : "ChatListNoResults"),
-                        startingPosition: .begin,
-                        lottieSettings: component.context.lottieRenderingSettings
+                        startingPosition: .begin
                     )),
                     environment: {},
                     containerSize: CGSize(width: animationHeight, height: animationHeight)
@@ -2070,13 +2142,22 @@ private final class WalletPeerSelectionScreenComponent: Component {
 }
 
 public final class WalletPeerSelectionScreen: ViewControllerComponentContainer {
+
+    /// Draws its own header (no Display bar); it takes part in navigation transitions itself.
+    override public var navigationBarTransitionSource: NavigationBarTransitionSource? {
+        guard self.isNodeLoaded else {
+            return nil
+        }
+        return (self.node.hostView.componentView as? WalletPeerSelectionScreenComponent.View)?.navigationTransitionHeader
+    }
     public init(
         context: AccountContext,
         walletContext: WalletContext,
         mode: WalletPeerSelectionScreenMode = .transfer,
         dismissSourceScreen: @escaping () -> Void = {},
         transferAnimation: WalletSendTransferAnimation? = nil,
-        returnedToWallet: (() -> Void)? = nil
+        returnedToWallet: (() -> Void)? = nil,
+        moveToGifts: (() -> Void)? = nil
     ) {
         let updatedPresentationData = presentationDataWithDefaultAccent((
             initial: context.sharedContext.currentPresentationData.with { $0 },
@@ -2091,7 +2172,8 @@ public final class WalletPeerSelectionScreen: ViewControllerComponentContainer {
                 mode: mode,
                 dismissSourceScreen: dismissSourceScreen,
                 transferAnimation: transferAnimation,
-                returnedToWallet: returnedToWallet
+                returnedToWallet: returnedToWallet,
+                moveToGifts: moveToGifts
             ),
             navigationBarAppearance: .none,
             theme: .default,

@@ -1,7 +1,7 @@
 import Foundation
 import WebProxyTransport
 import Postbox
-import TelegramApi
+internal import TelegramApi
 import SwiftSignalKit
 import MtProtoKit
 import NetworkLogging
@@ -532,6 +532,9 @@ private final class NetworkMainSessionDelegate: NetworkEngineSessionDelegate {
 }
 
 func initializedNetwork(accountId: AccountRecordId, arguments: NetworkInitializationArguments, supplementary: Bool, datacenterId: Int, keychain: Keychain, basePath: String, testingEnvironment: Bool, languageCode: String?, proxySettings: ProxySettings?, networkSettings: NetworkSettings?, networkEngine: NetworkEngineInputs, phoneNumber: String?, useRequestTimeoutTimers: Bool, appConfiguration: AppConfiguration) -> Signal<Network, NoError> {
+    // TelegramApi's field accessors are inlined into this module; trap if it was built against a
+    // different TelegramApi layout (stale objects from an incremental non-Bazel build).
+    tlVerifyClientLayout()
     return Signal { subscriber in
         let queue = Queue()
         queue.async {
@@ -916,8 +919,6 @@ public final class Network: NSObject {
     let requestService: NetworkEngineRequestService
     let basePath: String
     private let mainSessionDelegate: NetworkMainSessionDelegate
-    /// Records requests and failures of every session, whichever engine runs them. Nil unless
-    /// `network_telemetry_enabled` was set when the network started (always set in Debug builds).
     public let telemetry: NetworkTelemetry?
     private let useRequestTimeoutTimers: Bool
     private let baseTcpConnectionInterfaceFactory: ((MTTcpConnectionInterfaceDelegate, DispatchQueue) -> MTTcpConnectionInterface)?
@@ -936,7 +937,10 @@ public final class Network: NSObject {
     var multiplexedRequestManager: MultiplexedRequestManager {
         return self._multiplexedRequestManager!
     }
-    
+
+    // Fed by FetchV2's media part requests.
+    let downloadThroughputMeter = DownloadThroughputMeter()
+
     private let _contextProxyId: ValuePromise<NetworkContextProxyId?>
     var contextProxyId: Signal<NetworkContextProxyId?, NoError> {
         return self._contextProxyId.get()
@@ -1368,7 +1372,7 @@ public final class Network: NSObject {
         }
     }
     
-    public func requestWithAdditionalInfo<T>(_ data: (FunctionDescription, Buffer, DeserializeFunctionResponse<T>), info: NetworkRequestAdditionalInfo, tag: NetworkRequestDependencyTag? = nil, automaticFloodWait: Bool = true, onFloodWaitError: ((String) -> Void)? = nil) -> Signal<NetworkRequestResult<T>, MTRpcError> {
+    func requestWithAdditionalInfo<T>(_ data: (FunctionDescription, Buffer, DeserializeFunctionResponse<T>), info: NetworkRequestAdditionalInfo, tag: NetworkRequestDependencyTag? = nil, automaticFloodWait: Bool = true, onFloodWaitError: ((String) -> Void)? = nil) -> Signal<NetworkRequestResult<T>, MTRpcError> {
         let requestService = self.requestService
         return Signal { [requestService] subscriber in
             let request = NetworkEngineRequest(
@@ -1414,7 +1418,7 @@ public final class Network: NSObject {
         }
     }
     
-    public func request<T>(_ data: (FunctionDescription, Buffer, DeserializeFunctionResponse<T>), tag: NetworkRequestDependencyTag? = nil, automaticFloodWait: Bool = true, onFloodWaitError: ((String) -> Void)? = nil) -> Signal<T, MTRpcError> {
+    func request<T>(_ data: (FunctionDescription, Buffer, DeserializeFunctionResponse<T>), tag: NetworkRequestDependencyTag? = nil, automaticFloodWait: Bool = true, onFloodWaitError: ((String) -> Void)? = nil) -> Signal<T, MTRpcError> {
         let requestService = self.requestService
         return Signal { [requestService] subscriber in
             let request = NetworkEngineRequest(
@@ -1585,3 +1589,45 @@ func makeCloudDataContext(encryptionProvider: EncryptionProvider) -> CloudDataCo
     }
 }
 #endif
+
+extension Network {
+    /// A network carried by `engine` alone, for tests that script the server (`Tests/StateSync`).
+    ///
+    /// The `MTContext` is real but never connects: no keychain (nothing is read or persisted), no seed
+    /// or backup addresses, no backup-address discovery, and no MTProto session is ever made on it,
+    /// because the main session and every worker come from `engine`. Telemetry is off, so requests reach
+    /// `engine` unwrapped. Construction itself touches no file and starts no connection; the only calls
+    /// it makes on the main session are `setPaused(true)` and `setOnline(false)`, later, on the network's
+    /// queue. Set `Logger.setSharedLogger` first: that pause is logged, and `Logger.shared` asserts
+    /// when no logger is set.
+    static func makeForTesting(engine: NetworkEngine, basePath: String, encryptionProvider: EncryptionProvider, datacenterId: Int = 2) -> Network {
+        let context = MTContext(serialization: Serialization(), encryptionProvider: encryptionProvider, apiEnvironment: MTApiEnvironment(deviceModelName: nil), isTestingEnvironment: true, useTempAuthKeys: true)
+        engine.activate()
+        let connectionStatus = Promise<ConnectionStatus>(.waitingForNetwork)
+        let mainSessionDelegate = NetworkMainSessionDelegate(connectionStatus: connectionStatus)
+        let mainSession = engine.makeSession(datacenterId: datacenterId, role: .main, usageCalculationInfo: nil, delegate: mainSessionDelegate)
+        return Network(
+            queue: Queue(),
+            datacenterId: datacenterId,
+            context: context,
+            engine: engine,
+            switchingEngine: nil,
+            engineFactory: nil,
+            rustEngineDisabled: false,
+            rustEngineWaitsForWebProxy: false,
+            mainSession: mainSession,
+            mainSessionDelegate: mainSessionDelegate,
+            telemetry: nil,
+            _connectionStatus: connectionStatus,
+            basePath: basePath,
+            appDataDisposable: EmptyDisposable,
+            encryptionProvider: encryptionProvider,
+            useRequestTimeoutTimers: false,
+            useBetaFeatures: false,
+            useExperimentalFeatures: false,
+            baseTcpConnectionInterfaceFactory: nil,
+            isAppExtension: false,
+            initialWebProxyActive: false
+        )
+    }
+}

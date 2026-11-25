@@ -4,7 +4,7 @@ import AsyncDisplayKit
 import Postbox
 import SwiftSignalKit
 import Display
-import ChatSideColumnLayout
+import SideColumnLayout
 import TelegramCore
 import TelegramPresentationData
 import TelegramUIPreferences
@@ -76,6 +76,9 @@ import RichTextEditorUIKit
 import RichTextEditorMediaView
 import InstantPageUI
 import ChatRichTextEditorComposer
+import ChatHistoryListViewBackend
+import MessageWidget
+import TabBarLayout
 
 final class VideoNavigationControllerDropContentItem: NavigationControllerDropContentItem {
     let itemNode: OverlayMediaItemNode
@@ -199,6 +202,18 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
             self.overlayNavigationBar?.title = self.overlayTitle
         }
     }
+
+    var overlayTitleContent: ChatTitleContent? {
+        didSet {
+            self.overlayNavigationBar?.titleContent = self.overlayTitleContent
+        }
+    }
+
+    var overlayTitleActivities: ChatTitleComponent.Activities? {
+        didSet {
+            self.overlayNavigationBar?.titleActivities = self.overlayTitleActivities
+        }
+    }
     
     let wrappingNode: SpaceWarpNode
     let contentContainerNode: ChatNodeContainer
@@ -293,7 +308,6 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
     private var inputMediaNodeStateContext = ChatEntityKeyboardInputNode.StateContext()
         
     let navigateButtons: ChatHistoryNavigationButtons
-    let sideColumnNode = ChatSideColumnNode()
     
     private var ignoreUpdateHeight = false
     private var overrideUpdateTextInputHeightTransition: ContainedViewLayoutTransition?
@@ -487,6 +501,11 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         self.controller = controller
         
         self.backgroundNode = backgroundNode
+        if case .standard(.embedded) = chatPresentationInterfaceState.mode {
+            // A history embedded in a profile pane (Saved): the wallpaper is decoration there. The chat screen itself is
+            // left as it is (its own pass).
+            backgroundNode.accessibilityElementsHidden = true
+        }
         
         self.wrappingNode = SpaceWarpNodeImpl()
         
@@ -568,8 +587,14 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
                         })
 
                         var messageText = message.text
-                        var messageMedia = message.media
-                        var hasDice = false
+                        // widget-sandbox v0.2: a widget is previewed as the copy the forward makes (no queries, no chat
+                        // state), as its local echo shows it.
+                        var messageMedia = message.media.map { media -> Media in
+                            return (media as? TelegramMediaWidget)?.forwardedCopy() ?? media
+                        }
+                        // Dice and widgets keep their sender under "hide sender names": the server keeps the header
+                        // (widget-sandbox v0.2, tgw-format.md).
+                        var keepsSender = false
                         
                         if hideNames || options.hideCaptions {
                             for media in message.media {
@@ -584,15 +609,15 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
                                     updatedMedia.append(TelegramMediaPoll(pollId: poll.pollId, publicity: poll.publicity, kind: poll.kind, text: poll.text, textEntities: poll.textEntities, options: poll.options, correctAnswers: poll.correctAnswers, results: TelegramMediaPollResults(voters: nil, totalVoters: nil, recentVoters: [], solution: nil, hasUnseenVotes: false, canViewStats: false), isClosed: false, deadlineTimeout: nil, deadlineDate: nil, pollHash: poll.pollHash))
                                     messageMedia = updatedMedia
                                 }
-                                if let _ = media as? TelegramMediaDice {
-                                    hasDice = true
+                                if media is TelegramMediaDice || media is TelegramMediaWidget {
+                                    keepsSender = true
                                 }
                             }
                         }
 
                         let ephemeralParams = ephemeralForwardParams(message)
                         if ephemeralParams != nil {
-                            if message.id.namespace == Namespaces.Message.EphemeralLocal || (hideNames && !hasDice) {
+                            if message.id.namespace == Namespaces.Message.EphemeralLocal || (hideNames && !keepsSender) {
                                 attributes.removeAll(where: { $0 is InlineBotMessageAttribute })
                             } else if let inlineBotPeerId = ephemeralParams?.inlineBotPeerId, !attributes.contains(where: { $0 is InlineBotMessageAttribute }) {
                                 attributes.append(InlineBotMessageAttribute(peerId: inlineBotPeerId, title: nil))
@@ -607,7 +632,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
                         } else {
                             forwardInfo = MessageForwardInfo(author: message.author, source: nil, sourceMessageId: nil, date: message.timestamp, authorSignature: nil, psaType: nil, flags: [])
                         }
-                        if hideNames && !hasDice {
+                        if hideNames && !keepsSender {
                             forwardInfo = nil
                         }
                         
@@ -807,7 +832,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
 
         var getContentAreaInScreenSpaceImpl: (() -> CGRect)?
         var onTransitionEventImpl: ((ContainedViewLayoutTransition) -> Void)?
-        self.messageTransitionNode = ChatMessageTransitionNodeImpl(listNode: self.historyNode, getContentAreaInScreenSpace: {
+        self.messageTransitionNode = ChatMessageTransitionNodeImpl(listNode: self.historyNode, animationParameters: context.sharedContext.immediateExperimentalUISettings.springSendAnimation ? .spring : .bezier, getContentAreaInScreenSpace: {
             return getContentAreaInScreenSpaceImpl?() ?? CGRect()
         }, onTransitionEvent: { transition in
             onTransitionEventImpl?(transition)
@@ -900,6 +925,10 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
     
         self.addSubnode(self.wrappingNode)
         self.wrappingNode.contentNode.addSubnode(self.contentContainerNode)
+        // VoiceOver: this container holds the history, the navigation bar and its accessory panels, which all start at
+        // the top of the screen, so ASDK's frame-sorted collector reads the navigation bar after the history. Keep
+        // UIKit's own order here until the chat screen gets its own VoiceOver pass.
+        self.contentContainerNode.accessibilityUsesViewElements = true
         self.contentContainerNode.contentNode.addSubnode(self.backgroundNode)
         self.contentContainerNode.contentNode.addSubnode(self.historyNodeContainer)
         
@@ -935,7 +964,6 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         self.wrappingNode.contentNode.addSubnode(self.messageTransitionNode.overlayContainerNode)
 
         self.contentContainerNode.contentNode.addSubnode(self.navigateButtons)
-        self.contentContainerNode.contentNode.addSubnode(self.sideColumnNode)
         self.wrappingNode.contentNode.addSubnode(self.presentationContextMarker)
         self.contentContainerNode.contentNode.addSubnode(self.contentDimNode)
         
@@ -1020,7 +1048,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
             self?.paste(data)
         }
         self.textInputPanelNode?.pastedMarkdownParser = { context, text in
-            return chatInputContentFromPastedMarkdown(context: context, plainText: text)
+            return chatInputContentFromPastedMarkdown(context: context, plainText: text, keepsBlankLines: true)
         }
         self.textInputPanelNode?.displayAttachmentMenu = { [weak self] in
             self?.displayAttachmentMenu()
@@ -1100,10 +1128,16 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         }
         self.panRecognizer = recognizer
         self.view.addGestureRecognizer(recognizer)
+        // While a message widget's control is held, a finger anywhere else in the chat does nothing until it lifts.
+        self.view.addGestureRecognizer(MessageWidgetChatLockRecognizer())
         
         self.view.disablesInteractiveTransitionGestureRecognizerNow = { [weak self] in
             guard let strongSelf = self else {
                 return false
+            }
+            // With the side list open a right swipe closes the list, not the chat.
+            if strongSelf.sideListOffset > 0.0 {
+                return true
             }
             if let _ = strongSelf.chatPresentationInterfaceState.inputTextPanelState.mediaRecordingState {
                 return true
@@ -1183,6 +1217,70 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         return CGSize(width: layout.size.width, height: height)
     }
     
+    /// How far the chat is moved left for the side list (`ChatSideListPanelNode`); the panel itself is the controller's.
+    private(set) var sideListOffset: CGFloat = 0.0
+
+    /// Dims the chat while the side list is out (the strip of it left on screen).
+    private var sideListDimNode: ASDisplayNode?
+
+    func updateSideListOffset(_ offset: CGFloat, dimAlpha: CGFloat, transition: ContainedViewLayoutTransition, completion: (() -> Void)? = nil) {
+        self.sideListOffset = offset
+        guard let (layout, _) = self.validLayout else {
+            completion?()
+            return
+        }
+        if dimAlpha > 0.0 || self.sideListDimNode != nil {
+            let dimNode: ASDisplayNode
+            if let current = self.sideListDimNode {
+                dimNode = current
+            } else {
+                dimNode = ASDisplayNode()
+                dimNode.backgroundColor = .black
+                dimNode.alpha = 0.0
+                dimNode.isUserInteractionEnabled = false
+                self.sideListDimNode = dimNode
+            }
+            // Over everything of the chat, panels it inserted later included; inside the card, so it keeps its corners.
+            if dimNode.supernode !== self.wrappingNode.contentNode || self.wrappingNode.contentNode.subnodes?.last !== dimNode {
+                self.wrappingNode.contentNode.addSubnode(dimNode)
+            }
+            dimNode.frame = CGRect(origin: CGPoint(), size: layout.size)
+            transition.updateAlpha(node: dimNode, alpha: dimAlpha, completion: { [weak self, weak dimNode] _ in
+                guard let self, let dimNode, self.sideListOffset == 0.0, self.sideListDimNode === dimNode else {
+                    return
+                }
+                self.sideListDimNode = nil
+                dimNode.removeFromSupernode()
+            })
+        }
+        // Moved aside, the chat is a card: its right corners take the screen's radius over the list's background.
+        if offset > 0.0 {
+            self.wrappingNode.layer.maskedCorners = [.layerMaxXMinYCorner, .layerMaxXMaxYCorner]
+            self.wrappingNode.clipsToBounds = true
+            transition.updateCornerRadius(node: self.wrappingNode, cornerRadius: layout.deviceMetrics.screenCornerRadius)
+        } else {
+            transition.updateCornerRadius(node: self.wrappingNode, cornerRadius: 0.0, completion: { [weak self] _ in
+                guard let self, self.sideListOffset == 0.0 else {
+                    return
+                }
+                self.wrappingNode.clipsToBounds = false
+            })
+        }
+        transition.updateFrame(node: self.wrappingNode, frame: CGRect(origin: CGPoint(x: -offset, y: 0.0), size: layout.size), completion: { _ in
+            completion?()
+        })
+    }
+
+    /// Stops the side list's slide where it is (`updateSideListOffset` follows at the on-screen offset).
+    func removeSideListAnimations() {
+        for layer in [self.wrappingNode.layer, self.sideListDimNode?.layer].compactMap({ $0 }) {
+            layer.removeAnimation(forKey: "position")
+            layer.removeAnimation(forKey: "bounds")
+            layer.removeAnimation(forKey: "cornerRadius")
+            layer.removeAnimation(forKey: "opacity")
+        }
+    }
+
     func forceUpdateWarpContents() {
         guard let (layout, _) = self.validLayout else {
             return
@@ -1190,7 +1288,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         self.wrappingNode.update(size: layout.size, cornerRadius: layout.deviceMetrics.screenCornerRadius, transition: .immediate)
     }
     
-    func containerLayoutUpdated(_ layout: ContainerViewLayout, navigationBarHeight: CGFloat, transition protoTransition: ContainedViewLayoutTransition, listViewTransaction: (ListViewUpdateSizeAndInsets, CGFloat, Bool, @escaping () -> Void) -> Void, updateExtraNavigationBarBackgroundHeight: (CGFloat, CGFloat, CGSize?, ContainedViewLayoutTransition) -> Void) {
+    func containerLayoutUpdated(_ layout: ContainerViewLayout, navigationBarHeight: CGFloat, transition protoTransition: ContainedViewLayoutTransition, listViewTransaction: (ListViewUpdateSizeAndInsets, CGFloat, Bool, @escaping () -> Void) -> Void, updateExtraNavigationBarBackgroundHeight: (CGFloat, CGFloat, ContainedViewLayoutTransition) -> Void) {
         let transition: ContainedViewLayoutTransition
         if let _ = self.scheduledAnimateInAsOverlayFromNode {
             transition = .immediate
@@ -1198,7 +1296,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
             transition = protoTransition
         }
         
-        transition.updateFrame(node: self.wrappingNode, frame: CGRect(origin: CGPoint(), size: layout.size))
+        transition.updateFrame(node: self.wrappingNode, frame: CGRect(origin: CGPoint(x: -self.sideListOffset, y: 0.0), size: layout.size))
         self.wrappingNode.update(size: layout.size, cornerRadius: layout.deviceMetrics.screenCornerRadius, transition: ComponentTransition(transition))
         
         if let statusBar = self.statusBar {
@@ -1349,7 +1447,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
             if self.containerNode == nil {
                 let containerNode = ASDisplayNode()
                 containerNode.clipsToBounds = true
-                containerNode.cornerRadius = 15.0
+                containerNode.cornerRadius = 26.0
                 containerNode.addSubnode(self.backgroundNode)
                 containerNode.addSubnode(self.historyNodeContainer)
                 self.contentContainerNode.isHidden = true
@@ -1361,7 +1459,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
                 self.navigationBar?.isHidden = true
             }
             if self.overlayNavigationBar == nil {
-                let overlayNavigationBar = ChatOverlayNavigationBar(theme: self.chatPresentationInterfaceState.theme, strings: self.chatPresentationInterfaceState.strings, nameDisplayOrder: self.chatPresentationInterfaceState.nameDisplayOrder, tapped: { [weak self] in
+                let overlayNavigationBar = ChatOverlayNavigationBar(context: self.context, theme: self.chatPresentationInterfaceState.theme, strings: self.chatPresentationInterfaceState.strings, dateTimeFormat: self.chatPresentationInterfaceState.dateTimeFormat, nameDisplayOrder: self.chatPresentationInterfaceState.nameDisplayOrder, tapped: { [weak self] in
                     if let strongSelf = self {
                         strongSelf.dismissAsOverlay()
                         if case let .peer(id) = strongSelf.chatPresentationInterfaceState.chatLocation {
@@ -1372,6 +1470,8 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
                     self?.dismissAsOverlay()
                 })
                 overlayNavigationBar.title = self.overlayTitle
+                overlayNavigationBar.titleContent = self.overlayTitleContent
+                overlayNavigationBar.titleActivities = self.overlayTitleActivities
                 self.overlayNavigationBar = overlayNavigationBar
                 self.containerNode?.addSubnode(overlayNavigationBar)
             }
@@ -1453,7 +1553,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         var footerPanels: [HeaderPanelContainerComponent.Panel] = []
         let hideTopPanels = self.controller?.hideTopPanels ?? false
         
-        if !hideTopPanels, self.chatPresentationInterfaceState.search == nil, let headerTopicsPanel = headerTopicsPanelForChatPresentationInterfaceState(self.chatPresentationInterfaceState, context: self.context, controllerInteraction: self.controllerInteraction, interfaceInteraction: self.interfaceInteraction, force: false) {
+        if !hideTopPanels, self.chatPresentationInterfaceState.search == nil, let headerTopicsPanel = headerTopicsPanelForChatPresentationInterfaceState(self.chatPresentationInterfaceState, context: self.context, controllerInteraction: self.controllerInteraction, interfaceInteraction: self.interfaceInteraction, force: false, sideListActive: chatSideListKindForChatPresentationInterfaceState(self.chatPresentationInterfaceState, context: self.context) != nil) {
             let panel = HeaderPanelContainerComponent.Panel(
                 key: "topics",
                 orderIndex: 0,
@@ -1771,7 +1871,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         var immediatelyLayoutFloatingTopicsNodeAndAnimateAppearance = false
         var didChangeFloatingTopicsPanel = false
         
-        if let floatingTopicsPanelComponent = floatingTopicsPanelForChatPresentationInterfaceState(self.chatPresentationInterfaceState, context: self.context, controllerInteraction: self.controllerInteraction, interfaceInteraction: self.interfaceInteraction, force: false) {
+        if let floatingTopicsPanelComponent = floatingTopicsPanelForChatPresentationInterfaceState(self.chatPresentationInterfaceState, context: self.context, controllerInteraction: self.controllerInteraction, interfaceInteraction: self.interfaceInteraction, force: false, sideListActive: chatSideListKindForChatPresentationInterfaceState(self.chatPresentationInterfaceState, context: self.context) != nil) {
             if self.floatingTopicsPanel == nil {
                 self.floatingTopicsPanel = (ComponentView(), floatingTopicsPanelComponent)
                 immediatelyLayoutFloatingTopicsNodeAndAnimateAppearance = true
@@ -1824,6 +1924,15 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
             return self.makeMediaInputNode()
         })
         
+        // The gap between the bottom inset and the bottom panels.
+        let inputPanelsInset: CGFloat = 8.0
+        // The bottom inset with neither a keyboard nor an input node, the least the panels sit above.
+        var restingBottomInset = cleanInsets.bottom
+        // iPad: the bottom panels' row (a panel's default height, 40pt) rests centred on the tab bar in the master
+        // pane beside the chat, while there is one (not beside a pushed master screen, such as a forum's topics).
+        if case .tablet = layout.deviceMetrics.type, case .regular = layout.metrics.widthClass, layout.isBesideBottomTabBar, case .standard(.default) = self.chatPresentationInterfaceState.mode {
+            restingBottomInset += tabBarAlignedRowBottomInsetOffset(bottomInset: restingBottomInset, rowSpacing: inputPanelsInset, rowHeight: 40.0)
+        }
         var insets: UIEdgeInsets
         var inputPanelBottomInsetTerm: CGFloat = 0.0
         if let inputNodeForState = inputNodeForState {
@@ -1833,16 +1942,19 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
             }
             
             insets = layout.insets(options: [])
+            insets.bottom = restingBottomInset
             inputPanelBottomInsetTerm = max(insets.bottom, layout.standardInputHeight)
         } else {
             insets = layout.insets(options: [.input])
+            // A keyboard taller than the resting inset takes over from it continuously.
+            insets.bottom = max(layout.inputHeight ?? 0.0, restingBottomInset)
         }
 
         switch self.chatPresentationInterfaceState.mode {
         case .standard(.embedded):
             break
         case .overlay:
-            insets.top = 44.0
+            insets.top = ChatOverlayNavigationBar.height
         default:
             insets.top += navigationBarHeight
         }
@@ -1863,12 +1975,12 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         
         let inputPanelBottomInset = max(insets.bottom, inputPanelBottomInsetTerm)
         
-        // iPhone Duo: the column's frames, and the input panel's side insets for its band (it runs into
-        // the strip where the bottom corner has no block, never under the column).
-        let sideColumnFrames = layout.sideColumnFrames(itemSize: CGSize(width: 48.0, height: 48.0), spacing: 12.0, count: self.sideColumnNode.itemCount, minY: (layout.statusBarHeight ?? 0.0) + 8.0)
+        // iPhone Duo: the input panel's side insets for its band: it runs into the strip where the bottom corner has no
+        // block, never under the bar's side column.
+        let sideColumnExtent = self.controller?.navigationBarSideColumnExtent(layout: layout).map { (edge: $0.edge, maxY: $0.frame.maxY) }
         let inputPanelBandMaxY = layout.size.height - inputPanelBottomInset
         let inputPanelBandMinY = inputPanelBandMaxY - max(44.0, self.inputPanelNode?.frame.height ?? 0.0)
-        let inputPanelSideInsets = chatInputPanelSideInsets(layout: layout, bandMinY: inputPanelBandMinY, bandMaxY: inputPanelBandMaxY, column: sideColumnFrames)
+        let inputPanelSideInsets = sideColumnBandInsets(layout: layout, bandMinY: inputPanelBandMinY, bandMaxY: inputPanelBandMaxY, column: sideColumnExtent)
         
         if let inputPanelNode = inputPanelNodes.primary, !previewing {
             if inputPanelNode !== self.inputPanelNode {
@@ -2091,7 +2203,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         transition.updateFrame(node: self.inputContextPanelContainer, frame: CGRect(origin: CGPoint(x: 0.0, y: 0.0), size: CGSize(width: layout.size.width, height: layout.size.height)))
         transition.updateFrame(node: self.inputContextOverTextPanelContainer, frame: CGRect(origin: CGPoint(x: 0.0, y: 0.0), size: CGSize(width: layout.size.width, height: layout.size.height)))
 
-        updateExtraNavigationBarBackgroundHeight(0.0, 0.0, nil, transition)
+        updateExtraNavigationBarBackgroundHeight(0.0, 0.0, transition)
         
         var sidePanelTopInset: CGFloat = insets.top - 4.0
         
@@ -2118,6 +2230,8 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
             self.pendingSwitchToChatLocation = nil
             
             let previousHistoryNode = self.historyNode
+            // Switching in place (another forum topic) does not go through viewWillDisappear.
+            previousHistoryNode.readVisibleMessagesBeforeLeaving()
             self.historyNode = pendingSwitchToChatLocation.historyNode
             
             self.historyNode.position = previousHistoryNode.position
@@ -2136,7 +2250,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
             
             previousHistoryNode.supernode?.insertSubnode(self.historyNode, aboveSubnode: previousHistoryNode)
             
-            let messageTransitionNode = ChatMessageTransitionNodeImpl(listNode: self.historyNode, getContentAreaInScreenSpace: { [weak self] in
+            let messageTransitionNode = ChatMessageTransitionNodeImpl(listNode: self.historyNode, animationParameters: self.messageTransitionNode.animationParameters, getContentAreaInScreenSpace: { [weak self] in
                 guard let self else {
                     return CGRect()
                 }
@@ -2321,7 +2435,6 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
             self.overlayContextPanelNode = nil
         }
         
-        let inputPanelsInset: CGFloat = 8.0
         let accessoryPanelsInset: CGFloat = 8.0
         var inputPanelsHeight: CGFloat = 0.0
         
@@ -2396,9 +2509,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
             }
             
             var footerPanelsWidth = layout.size.width - layout.safeInsets.left - layout.safeInsets.right + 16.0
-            if containerInsets.bottom <= 32.0 {
-                footerPanelsWidth -= 36.0
-            }
+            footerPanelsWidth -= 2.0 * chatBottomControlsCompactSideInset(bottomInset: containerInsets.bottom, deviceMetrics: layout.deviceMetrics)
             
             let footerPanelsSizeValue = footerPanelsView.update(
                 transition: footerPanelsTransition,
@@ -2530,7 +2641,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         }
         
         if let overlayNavigationBar = self.overlayNavigationBar {
-            let barFrame = CGRect(origin: CGPoint(), size: CGSize(width: contentBounds.size.width, height: 44.0))
+            let barFrame = CGRect(origin: CGPoint(), size: CGSize(width: contentBounds.size.width, height: ChatOverlayNavigationBar.height))
             transition.updateFrame(node: overlayNavigationBar, frame: barFrame)
             overlayNavigationBar.updateLayout(size: barFrame.size, transition: transition)
         }
@@ -2709,17 +2820,14 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         let navigateButtonsMinY = layout.size.height - containerInsets.bottom - inputPanelsHeight - navigateButtonsSize.height - 20.0
         // iPhone Duo: beside a free bottom corner the input panel runs into the strip; the buttons follow it
         // (and keep the strip beside the column). Without corner blocks this is the plain safe inset.
-        let navigateButtonsRightInset = chatInputPanelSideInsets(layout: layout, bandMinY: navigateButtonsMinY, bandMaxY: navigateButtonsMinY + navigateButtonsSize.height, column: sideColumnFrames).right
+        let navigateButtonsRightInset = sideColumnBandInsets(layout: layout, bandMinY: navigateButtonsMinY, bandMaxY: navigateButtonsMinY + navigateButtonsSize.height, column: sideColumnExtent).right
         var navigateButtonsFrame = CGRect(origin: CGPoint(x: layout.size.width - navigateButtonsRightInset - navigateButtonsSize.width - 8.0, y: navigateButtonsMinY), size: navigateButtonsSize)
-        if containerInsets.bottom <= 32.0 {
-            navigateButtonsFrame.origin.x -= 18.0
-        }
+        // Over the panels' right edge on iPad, which does not step in there.
+        navigateButtonsFrame.origin.x -= chatBottomControlsCompactSideInset(bottomInset: containerInsets.bottom, deviceMetrics: layout.deviceMetrics)
         if case .overlay = self.chatPresentationInterfaceState.mode {
             navigateButtonsFrame = navigateButtonsFrame.offsetBy(dx: -8.0, dy: -8.0)
         }
         
-        transition.updateFrame(node: self.sideColumnNode, frame: CGRect(origin: CGPoint(), size: layout.size))
-        self.sideColumnNode.updateLayout(containerSize: layout.size, frames: sideColumnFrames?.frames ?? [], isHidden: self.chatPresentationInterfaceState.search != nil, transition: transition)
         
         var apparentInputPanelFrame = inputPanelFrame
         let apparentSecondaryInputPanelFrame = secondaryInputPanelFrame
@@ -2742,7 +2850,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         }
         
         var isInputExpansionEnabled = false
-        if case .media = self.chatPresentationInterfaceState.inputMode {
+        if case .media = self.chatPresentationInterfaceState.inputMode, inputNodeForState != nil {
             isInputExpansionEnabled = true
         }
         
@@ -2867,6 +2975,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
                 if let emojisPanelNode = inputContextPanelNode as? EmojisChatInputContextPanelNode {
                     emojisPanelNode.cursorAnchorX = self.textInputPanelNode?.currentCaretRect(in: emojisPanelNode.view)?.midX
                 }
+                inputContextPanelNode.coveredBottomInset = insets.bottom
                 inputContextPanelNode.updateLayout(size: panelFrame.size, leftInset: layout.safeInsets.left, rightInset: layout.safeInsets.right, bottomInset: insets.bottom + inputPanelsHeight + 8.0, transition: .immediate, interfaceState: self.chatPresentationInterfaceState)
             }
 
@@ -2874,6 +2983,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
             if let emojisPanelNode = inputContextPanelNode as? EmojisChatInputContextPanelNode {
                 emojisPanelNode.cursorAnchorX = self.textInputPanelNode?.currentCaretRect(in: emojisPanelNode.view)?.midX
             }
+            inputContextPanelNode.coveredBottomInset = insets.bottom
             inputContextPanelNode.updateLayout(size: panelFrame.size, leftInset: layout.safeInsets.left, rightInset: layout.safeInsets.right, bottomInset: insets.bottom + inputPanelsHeight + 8.0, transition: transition, interfaceState: self.chatPresentationInterfaceState)
         }
         
@@ -3074,7 +3184,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         
         if let disappearingNode = self.disappearingNode {
             let targetY: CGFloat
-            if cleanInsets.bottom.isLess(than: insets.bottom) {
+            if restingBottomInset.isLess(than: insets.bottom) {
                 targetY = layout.size.height - insets.bottom
             } else {
                 targetY = layout.size.height
@@ -3336,6 +3446,9 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
                             self.controller?.updateChatPresentationInterfaceState(animated: true, interactive: true, { state in
                                 var state = state
                                 state = state.updatedDisplayHistoryFilterAsList(false)
+                                if let search = state.search, let resultsState = search.resultsState, let currentId = chatSearchResultsCurrentId(selecting: message.id, in: resultsState.messageIndices) {
+                                    state = state.updatedSearch(search.withUpdatedResultsState(ChatSearchResultsState(messageIndices: resultsState.messageIndices, currentId: currentId, state: resultsState.state, totalCount: resultsState.totalCount, completed: resultsState.completed)))
+                                }
                                 if let channel = state.renderedPeer?.peer as? TelegramChannel, channel.isMonoForum, let linkedMonoforumId = channel.linkedMonoforumId, let mainChannel = self.chatPresentationInterfaceState.renderedPeer?.peers[linkedMonoforumId] as? TelegramChannel, mainChannel.hasPermission(.manageDirect) {
                                     state = state.updatedSearch(nil)
                                 }
@@ -3436,7 +3549,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
                             return nil
                         }
                         let strings = self.chatPresentationInterfaceState.strings
-                        let foundLocalPeers = context.engine.messages.searchLocalSavedMessagesPeers(query: query.lowercased(), indexNameMapping: [
+                        let foundLocalPeers = context.engine.messages.searchLocalSavedMessagesPeers(peerId: context.account.peerId, query: query.lowercased(), indexNameMapping: [
                             context.account.peerId: [
                                 PeerIndexNameRepresentation.title(title: strings.DialogList_MyNotes.lowercased(), addressNames: []),
                                 PeerIndexNameRepresentation.title(title: "my notes".lowercased(), addressNames: [])
@@ -4029,6 +4142,8 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
             break
         case .inputButtons:
             if let peer = self.chatPresentationInterfaceState.renderedPeer?.peer as? TelegramUser, peer.botInfo != nil, self.chatPresentationInterfaceState.keyboardButtonsMessage?.visibleButtonKeyboardMarkup?.flags.contains(.persistent) == true {
+            } else if chatDisplaysBotStartButton(self.chatPresentationInterfaceState) {
+                // The reply keyboard is hidden behind Start (a blocked bot), not shown: keep it for when Start goes.
             } else {
                 self.interfaceInteraction?.updateInputModeAndDismissedButtonKeyboardMessageId({ state in
                     return (.none, state.keyboardButtonsMessage?.id ?? state.interfaceState.messageActionsState.closedButtonKeyboardMessageId)
@@ -4140,8 +4255,8 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
     }
     
     func sendButtonFrame() -> CGRect? {
-        if let frame = self.textInputPanelNode?.sendActionButtons.frame {
-            return self.textInputPanelNode?.convert(frame, to: self)
+        if let sendActionButtons = self.textInputPanelNode?.sendActionButtons {
+            return sendActionButtons.view.convert(sendActionButtons.bounds, to: self.view)
         } else {
             return nil
         }
@@ -4574,7 +4689,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         if let (layout, navigationHeight) = self.validLayout {
             self.containerLayoutUpdated(layout, navigationBarHeight: navigationHeight, transition: transition, listViewTransaction: { updateSizeAndInsets, additionalScrollDistance, scrollToTop, completion in
                 self.historyNode.updateLayout(transition: transition, updateSizeAndInsets: updateSizeAndInsets, additionalScrollDistance: additionalScrollDistance, scrollToTop: scrollToTop, completion: completion)
-            }, updateExtraNavigationBarBackgroundHeight: { _, _, _, _ in
+            }, updateExtraNavigationBarBackgroundHeight: { _, _, _ in
             })
         }
     }
@@ -4832,7 +4947,9 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
                     self.controller?.presentFormulaEditor(initialValue: initialValue, completion: completion)
                 },
                 pastedMarkdownParser: { context, text in
-                    return chatInputContentFromPastedMarkdown(context: context, plainText: text)
+                    // The expanded composer keeps a pasted reply's blank lines as the inline one does: it sends the same
+                    // text + entities whenever the content allows.
+                    return chatInputContentFromPastedMarkdown(context: context, plainText: text, keepsBlankLines: true)
                 }
             )
             editorScreen.navigationPresentation = .modal
@@ -5133,10 +5250,11 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
             // Rich-message routing: new messages only (editMessage == nil), structural content the entity
             // set can't express (heading/list/table/media), and non-empty. Entity-expressible content
             // (text/quote/code/collapsed-quote/mention/date/custom-emoji-in-body) keeps the text+entities path.
-            let sendAsRichMessage = !sendWithoutFormatting
-                && effectivePresentationInterfaceState.interfaceState.editMessage == nil
-                && !composeContent.isEntityExpressible()
-                && !composeContent.isEmpty
+            // `chatComposerSendRoute` (TextFormat), shared with the composer harness's send-path oracle.
+            let sendAsRichMessage = chatComposerSendRoute(
+                content: composeContent,
+                isNewMessage: effectivePresentationInterfaceState.interfaceState.editMessage == nil,
+                sendWithoutFormatting: sendWithoutFormatting) == .rich
             
             var inlineStickers: [MediaId: Media] = [:]
             var firstLockedPremiumEmoji: TelegramMediaFile?
@@ -5192,21 +5310,30 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
                     let nsText = replyMessage.text as NSString
                     var startIndex = 0
                     var found = false
-                    while true {
-                        let range = nsText.range(of: quote.text, range: NSRange(location: startIndex, length: nsText.length - startIndex))
-                        if range.location != NSNotFound {
-                            let subEntities = messageTextEntitiesInRange(entities: replyMessage.textEntitiesAttribute?.entities ?? [], range: range, onlyQuoteable: true)
-                            if subEntities == quote.entities {
-                                found = true
+                    if let richText = quote.richText {
+                        // A rich quote is checked by the server's own rule against the page it was cut
+                        // from; a page still partial (before Show more) is checked as far as it goes.
+                        if let attribute = replyMessage.richText {
+                            let page = attribute.fullInstantPage ?? attribute.instantPage
+                            found = richReplyQuoteMatches(richText, nodes: page.quotableNodes, isPartialPage: !page.isComplete, offset: quote.offset)
+                        }
+                    } else {
+                        while true {
+                            let range = nsText.range(of: quote.text, range: NSRange(location: startIndex, length: nsText.length - startIndex))
+                            if range.location != NSNotFound {
+                                let subEntities = messageTextEntitiesInRange(entities: replyMessage.textEntitiesAttribute?.entities ?? [], range: range, onlyQuoteable: true)
+                                if subEntities == quote.entities {
+                                    found = true
+                                    break
+                                }
+
+                                startIndex = range.upperBound
+                            } else {
                                 break
                             }
-                            
-                            startIndex = range.upperBound
-                        } else {
-                            break
                         }
                     }
-                    
+
                     if !found, let controller = self.controller {
                         let authorName: String = (replyMessage.author.flatMap(EnginePeer.init))?.compactDisplayTitle ?? ""
                         let errorTextData =  self.chatPresentationInterfaceState.strings.Chat_ErrorQuoteOutdatedText(authorName)
@@ -5248,7 +5375,6 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
             if peerId?.namespace != Namespaces.Peer.SecretChat, let interactiveEmojis = self.interactiveEmojis, interactiveEmojis.emojis.contains(trimmedInputText), effectiveInputText.attribute(ChatTextInputAttributes.customEmoji, at: 0, effectiveRange: nil) == nil {
                 messages.append(.message(text: "", attributes: [], inlineStickers: [:], mediaReference: AnyMediaReference.standalone(media: TelegramMediaDice(emoji: trimmedInputText)), threadId: self.chatLocation.threadId, replyToMessageId: self.chatPresentationInterfaceState.interfaceState.replyMessageSubject?.subjectModel, replyToStoryId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: []))
             } else {
-                let inputText = convertMarkdownToAttributes(effectiveInputText)
                 
                 var mediaReference: AnyMediaReference?
                 var webpage: TelegramMediaWebpage?
@@ -5301,15 +5427,16 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
                     messages.append(.message(text: "", attributes: attributes, inlineStickers: inlineStickers, mediaReference: mediaReference, threadId: self.chatLocation.threadId, replyToMessageId: self.chatPresentationInterfaceState.interfaceState.replyMessageSubject?.subjectModel, replyToStoryId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: bubbleUpEmojiOrStickersets))
                 } else {
                 do {
-                    for text in breakChatInputText(trimChatInputText(inputText)) {
-                        if text.length != 0 {
+                    var isBusinessLinkSetup = false
+                    if case let .customChatContents(customChatContents) = self.chatPresentationInterfaceState.subject, case .businessLinkSetup = customChatContents.kind {
+                        isBusinessLinkSetup = true
+                    }
+                    // Markdown conversion, trim, the 4096 split and each piece's entities:
+                    // `chatComposerTextMessages` (TextFormat), shared with the composer harness's send-path oracle.
+                    let textMessages = chatComposerTextMessages(effectiveInputText: effectiveInputText, businessLinkSetup: isBusinessLinkSetup)
+                    for (text, entities) in textMessages.pieces {
+                        do {
                             var attributes: [MessageAttribute] = []
-                            let entities: [MessageTextEntity]
-                            if case let .customChatContents(customChatContents) = self.chatPresentationInterfaceState.subject, case .businessLinkSetup = customChatContents.kind {
-                                entities = generateChatInputTextEntities(text, generateLinks: false)
-                            } else {
-                                entities = generateTextEntities(text.string, enabledTypes: .all, currentEntities: generateChatInputTextEntities(text, maxAnimatedEmojisInText: 0))
-                            }
                             if !entities.isEmpty {
                                 attributes.append(TextEntitiesMessageAttribute(entities: entities))
                             }
@@ -5684,8 +5811,8 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         let avatarSnapshotState: ChatAvatarNavigationNode.SnapshotState?
         let navigationButtonsSnapshotState: ChatHistoryNavigationButtons.SnapshotState
         let titleAccessoryPanelSnapshot: UIView?
-        let navigationBarHeight: CGFloat
         let inputPanelNodeSnapshot: UIView?
+        let inputPanelOverscrollIslandHandOver: ((UIView) -> Void)?
 
         fileprivate init(
             backgroundNode: WallpaperBackgroundNode,
@@ -5694,8 +5821,8 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
             avatarSnapshotState: ChatAvatarNavigationNode.SnapshotState?,
             navigationButtonsSnapshotState: ChatHistoryNavigationButtons.SnapshotState,
             titleAccessoryPanelSnapshot: UIView?,
-            navigationBarHeight: CGFloat,
-            inputPanelNodeSnapshot: UIView?
+            inputPanelNodeSnapshot: UIView?,
+            inputPanelOverscrollIslandHandOver: ((UIView) -> Void)?
         ) {
             self.backgroundNode = backgroundNode
             self.historySnapshotState = historySnapshotState
@@ -5703,8 +5830,8 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
             self.avatarSnapshotState = avatarSnapshotState
             self.navigationButtonsSnapshotState = navigationButtonsSnapshotState
             self.titleAccessoryPanelSnapshot = titleAccessoryPanelSnapshot
-            self.navigationBarHeight = navigationBarHeight
             self.inputPanelNodeSnapshot = inputPanelNodeSnapshot
+            self.inputPanelOverscrollIslandHandOver = inputPanelOverscrollIslandHandOver
         }
     }
 
@@ -5714,9 +5841,12 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
     ) -> SnapshotState {
         let titleAccessoryPanelSnapshot: UIView? = nil
         var inputPanelNodeSnapshot: UIView?
+        var inputPanelOverscrollIslandHandOver: ((UIView) -> Void)?
         if let inputPanelNode = self.inputPanelNode, let snapshot = inputPanelNode.view.snapshotView(afterScreenUpdates: false) {
             snapshot.frame = inputPanelNode.frame
             inputPanelNodeSnapshot = snapshot
+            // Bubble-free mode: a "next channel" island leaves with the panel's snapshot (nil without one).
+            inputPanelOverscrollIslandHandOver = inputPanelNode.overscrollIslandHandOver()
         }
         return SnapshotState(
             backgroundNode: self.backgroundNode,
@@ -5725,8 +5855,8 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
             avatarSnapshotState: avatarSnapshotState,
             navigationButtonsSnapshotState: self.navigateButtons.prepareSnapshotState(),
             titleAccessoryPanelSnapshot: titleAccessoryPanelSnapshot,
-            navigationBarHeight: self.navigationBar?.backgroundNode.bounds.height ?? 0.0,
-            inputPanelNodeSnapshot: inputPanelNodeSnapshot
+            inputPanelNodeSnapshot: inputPanelNodeSnapshot,
+            inputPanelOverscrollIslandHandOver: inputPanelOverscrollIslandHandOver
         )
     }
 
@@ -5748,18 +5878,9 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
             })
         }
 
-        if let navigationBar = self.navigationBar {
-            let currentFrame = navigationBar.backgroundNode.frame
-            var previousFrame = currentFrame
-            previousFrame.size.height = snapshotState.navigationBarHeight
-            if previousFrame != currentFrame {
-                navigationBar.backgroundNode.update(size: previousFrame.size, transition: .immediate)
-                navigationBar.backgroundNode.update(size: currentFrame.size, transition: .animated(duration: 0.5, curve: .spring))
-            }
-        }
-
         if let inputPanelNode = self.inputPanelNode, let inputPanelNodeSnapshot = snapshotState.inputPanelNodeSnapshot {
             inputPanelNode.view.superview?.insertSubview(inputPanelNodeSnapshot, belowSubview: inputPanelNode.view)
+            snapshotState.inputPanelOverscrollIslandHandOver?(inputPanelNodeSnapshot)
 
             inputPanelNodeSnapshot.layer.animateAlpha(from: 1.0, to: 0.0, duration: 0.3, removeOnCompletion: false, completion: { [weak inputPanelNodeSnapshot] _ in
                 inputPanelNodeSnapshot?.removeFromSuperview()

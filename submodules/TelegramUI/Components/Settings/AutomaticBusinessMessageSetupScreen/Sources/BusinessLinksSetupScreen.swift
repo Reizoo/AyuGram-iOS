@@ -1,5 +1,4 @@
 import Foundation
-import LottieSettings
 import UIKit
 import Display
 import ComponentFlow
@@ -121,10 +120,6 @@ final class BusinessLinksSetupScreenComponent: Component {
             
             let navigationAlphaDistance: CGFloat = 16.0
             let navigationAlpha: CGFloat = max(0.0, min(1.0, (self.scrollView.contentOffset.y - navigationRevealOffsetY) / navigationAlphaDistance))
-            if let controller = self.environment?.controller(), let navigationBar = controller.navigationBar {
-                transition.setAlpha(layer: navigationBar.backgroundNode.layer, alpha: navigationAlpha)
-                transition.setAlpha(layer: navigationBar.stripeNode.layer, alpha: navigationAlpha)
-            }
             
             var scrolledUp = false
             if navigationAlpha < 0.5 {
@@ -258,7 +253,7 @@ final class BusinessLinksSetupScreenComponent: Component {
                 return
             }
             
-            environment.controller()?.present(component.context.sharedContext.makeShareController(context: component.context, params: ShareControllerParams(subject: .url(link.url), showInChat: nil, externalShare: false, immediateExternalShare: false)), in: .window(.root))
+            environment.controller()?.present(component.context.sharedContext.makeShareScreen(context: component.context, params: ShareControllerParams(subject: .url(link.url), showInChat: nil, externalShare: false, immediateExternalShare: false)), in: .window(.root))
         }
         
         func update(component: BusinessLinksSetupScreenComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: ComponentTransition) -> CGSize {
@@ -324,6 +319,8 @@ final class BusinessLinksSetupScreenComponent: Component {
             if let navigationTitleView = self.navigationTitle.view {
                 if navigationTitleView.superview == nil {
                     if let controller = self.environment?.controller(), let navigationBar = controller.navigationBar {
+                        // VoiceOver: the bar reads this title where its own is (NavigationBarNode), as the heading.
+                        navigationTitleView.accessibilityTraits = [.staticText, .header]
                         navigationBar.view.addSubview(navigationTitleView)
                     }
                 }
@@ -348,8 +345,7 @@ final class BusinessLinksSetupScreenComponent: Component {
                 transition: .immediate,
                 component: AnyComponent(LottieComponent(
                     content: LottieComponent.AppBundleContent(name: "MessageLinkEmoji"),
-                    loop: false,
-                    lottieSettings: component.context.lottieRenderingSettings
+                    loop: false
                 )),
                 environment: {},
                 containerSize: CGSize(width: 100.0, height: 100.0)

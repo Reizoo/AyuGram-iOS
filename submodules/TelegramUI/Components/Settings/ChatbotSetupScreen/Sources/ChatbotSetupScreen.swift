@@ -1,5 +1,4 @@
 import Foundation
-import LottieSettings
 import UIKit
 import Photos
 import Display
@@ -288,10 +287,10 @@ final class ChatbotSetupScreenComponent: Component {
                 transition.setScale(view: navigationTitleView, scale: titleScale)
             }
             
-            if let controller = environment.controller(), let navigationBar = controller.navigationBar, let edgeEffectView = navigationBar.edgeEffectView {
+            if let controller = environment.controller(), let navigationBar = controller.navigationBar {
                 let edgeEffectAlphaDistance = max(1.0, self.titleTransformContainer.center.y - titleCenterY)
                 let edgeEffectAlpha = max(0.0, min(1.0, self.scrollView.contentOffset.y / edgeEffectAlphaDistance))
-                transition.setAlpha(view: edgeEffectView, alpha: edgeEffectAlpha)
+                navigationBar.setBackdropAlpha(edgeEffectAlpha, transition: transition.containedViewLayoutTransition)
             }
         }
         
@@ -715,8 +714,7 @@ final class ChatbotSetupScreenComponent: Component {
                 transition: .immediate,
                 component: AnyComponent(LottieComponent(
                     content: LottieComponent.AppBundleContent(name: "ChatAutomation"),
-                    loop: false,
-                    lottieSettings: component.context.lottieRenderingSettings
+                    loop: false
                 )),
                 environment: {},
                 containerSize: CGSize(width: 140.0, height: 140.0)
@@ -794,6 +792,7 @@ final class ChatbotSetupScreenComponent: Component {
                 initialText: "",
                 resetText: resetQueryText.flatMap { ListTextFieldItemComponent.ResetText(value: $0) },
                 placeholder: environment.strings.ChatbotSetup_BotSearchPlaceholder,
+                clearButtonAccessibilityLabel: environment.strings.WebSearch_RecentSectionClear,
                 autocapitalizationType: .none,
                 autocorrectionType: .no,
                 updated: { [weak self] value in

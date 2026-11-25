@@ -1,5 +1,4 @@
 import Foundation
-import LottieSettings
 import UIKit
 import Display
 import AsyncDisplayKit
@@ -74,7 +73,7 @@ private final class GiftAuctionViewSheetContent: CombinedComponent {
         
         private var giftAuctionTimer: SwiftSignalKit.Timer?
         fileprivate var giftAuctionAcquiredGifts: [GiftAuctionAcquiredGift] = []
-        private var giftAuctionAcquiredGiftsPromise = ValuePromise<[GiftAuctionAcquiredGift]>()
+        private var didLoadGiftAuctionAcquiredGifts = false
         private var giftAuctionAcquiredGiftsDisposable = MetaDisposable()
         
         private(set) var giftUpgradeAttributes: [StarGift.UniqueGift.Attribute]?
@@ -224,7 +223,7 @@ private final class GiftAuctionViewSheetContent: CombinedComponent {
                     return
                 }
                 self.giftAuctionAcquiredGifts = acquiredGifts
-                self.giftAuctionAcquiredGiftsPromise.set(acquiredGifts)
+                self.didLoadGiftAuctionAcquiredGifts = true
                 self.updated(transition: .easeInOut(duration: 0.25))
             }))
         }
@@ -279,7 +278,13 @@ private final class GiftAuctionViewSheetContent: CombinedComponent {
                 compactUpgradeAttributes.append(contentsOf: self.previewSymbols)
             }
             
-            controller.completion(self.giftAuctionAcquiredGiftsPromise.get(), !compactUpgradeAttributes.isEmpty ? compactUpgradeAttributes : nil)
+            let acquiredGifts: Signal<[GiftAuctionAcquiredGift], NoError>
+            if self.didLoadGiftAuctionAcquiredGifts || (self.giftAuctionState?.myState.acquiredCount ?? 0) == 0 {
+                acquiredGifts = .single(self.giftAuctionAcquiredGifts)
+            } else {
+                acquiredGifts = self.context.engine.payments.getGiftAuctionAcquiredGifts(giftId: self.auctionContext.gift.giftId)
+            }
+            controller.completion(acquiredGifts, !compactUpgradeAttributes.isEmpty ? compactUpgradeAttributes : nil)
         }
         
         func openPeer(_ peer: EnginePeer, dismiss: Bool = true) {
@@ -330,7 +335,7 @@ private final class GiftAuctionViewSheetContent: CombinedComponent {
                 link = "https://t.me/auction/\(slug)"
             }
             
-            let shareController = self.context.sharedContext.makeShareController(
+            let shareController = self.context.sharedContext.makeShareScreen(
                 context: self.context,
                 params: ShareControllerParams(
                     subject: .url(link),
@@ -460,7 +465,7 @@ private final class GiftAuctionViewSheetContent: CombinedComponent {
                 self?.share()
             })))
 
-            let contextController = makeContextController(presentationData: presentationData, source: .reference(GiftViewContextReferenceContentSource(controller: controller, sourceView: view)), items: .single(ContextController.Items(content: .list(items))), gesture: gesture)
+            let contextController = makeContextController(presentationData: presentationData, source: .reference(GiftViewContextReferenceContentSource(controller: controller, sourceView: (view as? GlassBarButtonComponent.View)?.menuSourceView ?? view)), items: .single(ContextController.Items(content: .list(items))), gesture: gesture)
             controller.presentInGlobalOverlay(contextController)
         }
         
@@ -685,7 +690,7 @@ private final class GiftAuctionViewSheetContent: CombinedComponent {
                                 if case let .extendable(_, _, top, window) = round {
                                     var windowString: String
                                     if window % 60 == 0 {
-                                        windowString = strings.Gift_Auction_Minutes(window)
+                                        windowString = strings.Gift_Auction_Minutes(window / 60)
                                     } else {
                                         windowString = strings.Gift_Auction_Seconds(window)
                                     }
@@ -1257,8 +1262,7 @@ private final class GiftAuctionViewSheetContent: CombinedComponent {
                             ),
                             color: .white,
                             size: CGSize(width: 34.0, height: 34.0),
-                            playOnce: moreButtonPlayOnce,
-                            lottieSettings: component.context.lottieRenderingSettings
+                            playOnce: moreButtonPlayOnce
                         )
                     )),
                     action: { [weak state] view in

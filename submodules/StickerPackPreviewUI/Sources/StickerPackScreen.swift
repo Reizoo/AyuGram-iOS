@@ -1,5 +1,4 @@
 import Foundation
-import LottieSettings
 import UIKit
 import Display
 import AsyncDisplayKit
@@ -1114,7 +1113,7 @@ private final class StickerPackContainer: ASDisplayNode {
             
             if let strongSelf = self {
                 let parentNavigationController = strongSelf.controller?.parentNavigationController
-                let shareController = strongSelf.context.sharedContext.makeShareController(
+                let shareController = strongSelf.context.sharedContext.makeShareScreen(
                     context: strongSelf.context,
                     params: ShareControllerParams(
                         subject: shareSubject,
@@ -1207,7 +1206,7 @@ private final class StickerPackContainer: ASDisplayNode {
         
         let contextController = makeContextController(
             presentationData: presentationData,
-            source: .reference(StickerPackContextReferenceContentSource(controller: controller, sourceView: view)),
+            source: .reference(StickerPackContextReferenceContentSource(controller: controller, sourceView: (view as? GlassBarButtonComponent.View)?.menuSourceView ?? view)),
             items: .single(ContextController.Items(content: .list(items))),
             recognizer: nil,
             gesture: gesture
@@ -2089,8 +2088,7 @@ private final class StickerPackContainer: ASDisplayNode {
                         ),
                         color: self.presentationData.theme.chat.inputPanel.panelControlColor,
                         size: CGSize(width: 34.0, height: 34.0),
-                        playOnce: self.moreButtonPlayOnce,
-                        lottieSettings: self.context.lottieRenderingSettings
+                        playOnce: self.moreButtonPlayOnce
                     )
                 )),
                 action: { [weak self] view in

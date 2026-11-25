@@ -4,7 +4,6 @@ import AsyncDisplayKit
 import Display
 import ComponentFlow
 import SwiftSignalKit
-import Postbox
 import TelegramCore
 import TelegramPresentationData
 import TelegramUIPreferences
@@ -343,8 +342,7 @@ private final class AttachButtonComponent: CombinedComponent {
                         ),
                         tintColor: tintColor,
                         isAnimating: component.isAnimating,
-                        size: CGSize(width: iconSize.width * animationScale, height: iconSize.height * animationScale),
-                        lottieSettings: component.context.lottieRenderingSettings
+                        size: CGSize(width: iconSize.width * animationScale, height: iconSize.height * animationScale)
                     ),
                     availableSize: iconSize,
                     transition: context.transition
@@ -363,8 +361,7 @@ private final class AttachButtonComponent: CombinedComponent {
                         ),
                         tintColor: tintColor,
                         isAnimating: component.isAnimating,
-                        size: CGSize(width: iconSize.width * animationScale, height: iconSize.height * animationScale),
-                        lottieSettings: component.context.lottieRenderingSettings
+                        size: CGSize(width: iconSize.width * animationScale, height: iconSize.height * animationScale)
                     ),
                     availableSize: iconSize,
                     transition: context.transition
@@ -606,7 +603,9 @@ private final class MainButtonNode: HighlightTrackingButtonNode {
     private var state: AttachmentMainButtonState
     private var panelStyle: AttachmentPanel.Style?
     private var size: CGSize?
+    private var isDark: Bool = false
 
+    private var glassBackgroundView: GlassBackgroundView?
     private let backgroundAnimationNode: ASImageNode
     private var iconNode: ASImageNode?
     private var iconLayer: InlineStickerItemLayer?
@@ -762,7 +761,7 @@ private final class MainButtonNode: HighlightTrackingButtonNode {
                 self.updateShimmerParameters()
 
                 if let size = self.size, let context = self.context, let style = self.panelStyle {
-                    self.updateLayout(size: size, context: context, style: style, state: state, transition: .immediate)
+                    self.updateLayout(size: size, context: context, style: style, isDark: self.isDark, state: state, transition: .immediate)
                 }
             }
         } else if self.shimmerView != nil {
@@ -832,12 +831,13 @@ private final class MainButtonNode: HighlightTrackingButtonNode {
         }
     }
 
-    func updateLayout(size: CGSize, context: AccountContext, style: AttachmentPanel.Style, state: AttachmentMainButtonState, animateBackground: Bool = false, transition: ContainedViewLayoutTransition) {
+    func updateLayout(size: CGSize, context: AccountContext, style: AttachmentPanel.Style, isDark: Bool, state: AttachmentMainButtonState, animateBackground: Bool = false, transition: ContainedViewLayoutTransition) {
         let previousState = self.state
         self.context = context
         self.state = state
         self.panelStyle = style
         self.size = size
+        self.isDark = isDark
 
         switch style {
         case .glass:
@@ -845,6 +845,30 @@ private final class MainButtonNode: HighlightTrackingButtonNode {
         case .legacy:
             self.cornerRadius = 12.0
         }
+
+        var hasGlassBackground = false
+        if case .glass = style, case let .color(backgroundColor) = state.background, backgroundColor.alpha.isZero {
+            hasGlassBackground = true
+        }
+        if hasGlassBackground {
+            let glassBackgroundView: GlassBackgroundView
+            var glassTransition = ComponentTransition(transition)
+            if let current = self.glassBackgroundView {
+                glassBackgroundView = current
+            } else {
+                glassTransition = .immediate
+                glassBackgroundView = GlassBackgroundView()
+                glassBackgroundView.isUserInteractionEnabled = false
+                self.glassBackgroundView = glassBackgroundView
+                self.view.insertSubview(glassBackgroundView, at: 0)
+            }
+            glassBackgroundView.update(size: size, cornerRadius: size.height * 0.5, isDark: isDark, tintColor: .init(kind: .panel), transition: glassTransition)
+            glassTransition.setFrame(view: glassBackgroundView, frame: CGRect(origin: .zero, size: size))
+        } else if let glassBackgroundView = self.glassBackgroundView {
+            self.glassBackgroundView = nil
+            glassBackgroundView.removeFromSuperview()
+        }
+        self.clipsToBounds = !hasGlassBackground
 
         self.isUserInteractionEnabled = state.isVisible
 
@@ -1049,7 +1073,7 @@ final class AttachmentPanel: ASDisplayNode, ASScrollViewDelegate, ASGestureRecog
     private var mediaStatusDisposable: Disposable?
     private var playlistPreloadDisposable: Disposable?
 
-    private var iconDisposables: [MediaId: Disposable] = [:]
+    private var iconDisposables: [EngineMedia.Id: Disposable] = [:]
     private var playlistStateAndType: (SharedMediaPlaylistItem, SharedMediaPlaylistItem?, SharedMediaPlaylistItem?, MusicPlaybackSettingsOrder, MediaManagerPlayerType, Account)?
     private var playlistLocation: SharedMediaPlaylistLocation?
     private var mediaAccessoryPanel: (MediaNavigationAccessoryPanel, MediaManagerPlayerType)?
@@ -1838,7 +1862,7 @@ final class AttachmentPanel: ASDisplayNode, ASScrollViewDelegate, ASGestureRecog
                 let settings = transaction.getSharedData(ApplicationSpecificSharedDataKeys.musicPlaybackSettings)?.get(MusicPlaybackSettings.self) ?? MusicPlaybackSettings.defaultSettings
 
                 transaction.updateSharedData(ApplicationSpecificSharedDataKeys.musicPlaybackSettings, { _ in
-                    return PreferencesEntry(settings.withUpdatedVoicePlaybackRate(rate))
+                    return EnginePreferencesEntry(settings.withUpdatedVoicePlaybackRate(rate))
                 })
                 return rate
             }
@@ -2162,12 +2186,12 @@ final class AttachmentPanel: ASDisplayNode, ASScrollViewDelegate, ASGestureRecog
                         if self.iconDisposables[file.fileId] == nil, let peer = PeerReference(bot.peer) {
                             if case .placeholder = name {
                                 let account = self.context.account
-                                let path = account.postbox.mediaBox.cachedRepresentationCompletePath(file.resource.id, representation: CachedPreparedSvgRepresentation())
+                                let path = TelegramEngine(account: account).resources.cachedRepresentationCompletePath(id: EngineMediaResource.Id(file.resource.id), representation: CachedPreparedSvgRepresentation())
                                 if !FileManager.default.fileExists(atPath: path) {
                                     let accountFullSizeData = Signal<(Data?, Bool), NoError> { subscriber in
-                                        let accountResource = account.postbox.mediaBox.cachedResourceRepresentation(file.resource, representation: CachedPreparedSvgRepresentation(), complete: false, fetch: true)
+                                        let accountResource = TelegramEngine(account: account).resources.cachedRepresentation(resource: EngineMediaResource(file.resource), representation: CachedPreparedSvgRepresentation(), complete: false, fetch: true)
 
-                                        let fetchedFullSize = fetchedMediaResource(mediaBox: account.postbox.mediaBox, userLocation: .other, userContentType: MediaResourceUserContentType(file: file), reference: .media(media: .attachBot(peer: peer, media: file), resource: file.resource))
+                                        let fetchedFullSize = TelegramEngine(account: account).resources.fetch(reference: .media(media: .attachBot(peer: peer, media: file), resource: file.resource), userLocation: .other, userContentType: MediaResourceUserContentType(file: file))
                                         let fetchedFullSizeDisposable = fetchedFullSize.start()
                                         let fullSizeDisposable = accountResource.start()
 
@@ -2540,7 +2564,7 @@ final class AttachmentPanel: ASDisplayNode, ASScrollViewDelegate, ASGestureRecog
             self.updateChatPresentationInterfaceState(update: false, transition: .immediate, { state in
                 var selectedMessages: [EngineMessage.Id] = []
                 for i in 0 ..< selectionCount {
-                    selectedMessages.append(EngineMessage.Id(peerId: PeerId(0), namespace: Namespaces.Message.Local, id: Int32(i)))
+                    selectedMessages.append(EngineMessage.Id(peerId: EnginePeer.Id(0), namespace: Namespaces.Message.Local, id: Int32(i)))
                 }
                 return state.updatedInterfaceState { state in
                     return state.withUpdatedForwardMessageIds(selectedMessages)
@@ -2969,7 +2993,7 @@ final class AttachmentPanel: ASDisplayNode, ASScrollViewDelegate, ASGestureRecog
 
             if let mainButtonFrame {
                 if !self.dismissed {
-                    self.mainButtonNode.updateLayout(size: buttonSize, context: self.context, style: self.panelStyle, state: self.mainButtonState, animateBackground: self.mainButtonState.background.colorValue == self.backgroundNode.color && transition.isAnimated, transition: transition)
+                    self.mainButtonNode.updateLayout(size: buttonSize, context: self.context, style: self.panelStyle, isDark: self.presentationData.theme.overallDarkAppearance, state: self.mainButtonState, animateBackground: self.mainButtonState.background.colorValue == self.backgroundNode.color && transition.isAnimated, transition: transition)
                 }
                 if self.mainButtonNode.frame.width.isZero {
                     self.mainButtonNode.frame = mainButtonFrame
@@ -2982,7 +3006,7 @@ final class AttachmentPanel: ASDisplayNode, ASScrollViewDelegate, ASGestureRecog
             }
             if let secondaryButtonFrame {
                 if !self.dismissed {
-                    self.secondaryButtonNode.updateLayout(size: buttonSize, context: self.context, style: self.panelStyle, state: self.secondaryButtonState, animateBackground: self.secondaryButtonState.background.colorValue == self.backgroundNode.color && transition.isAnimated, transition: transition)
+                    self.secondaryButtonNode.updateLayout(size: buttonSize, context: self.context, style: self.panelStyle, isDark: self.presentationData.theme.overallDarkAppearance, state: self.secondaryButtonState, animateBackground: self.secondaryButtonState.background.colorValue == self.backgroundNode.color && transition.isAnimated, transition: transition)
                 }
                 if self.secondaryButtonNode.frame.width.isZero {
                     self.secondaryButtonNode.frame = secondaryButtonFrame

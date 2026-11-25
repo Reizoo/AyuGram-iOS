@@ -1,5 +1,4 @@
 import Foundation
-import LottieSettings
 import UIKit
 import AsyncDisplayKit
 import TelegramPresentationData
@@ -285,8 +284,7 @@ private final class BadgeComponent: Component {
                     size: badgeShapeSize,
                     renderingScale: UIScreenScale,
                     loop: false,
-                    playOnce: nil,
-                    lottieSettings: .noAccountFallback
+                    playOnce: nil
                 )),
                 environment: {},
                 containerSize: badgeShapeSize
@@ -1187,6 +1185,7 @@ private final class GiftAuctionBidScreenComponent: Component {
         
         private var giftAuctionAcquiredGifts: [GiftAuctionAcquiredGift]?
         private let giftAuctionAcquiredGiftsDisposable = MetaDisposable()
+        private var didHandleFinishedAuction = false
         
         private let actionButton = ComponentView<Empty>()
                 
@@ -1738,7 +1737,7 @@ private final class GiftAuctionBidScreenComponent: Component {
                 link = "https://t.me/auction/\(slug)"
             }
             
-            let shareController = context.sharedContext.makeShareController(
+            let shareController = context.sharedContext.makeShareScreen(
                 context: context,
                 params: ShareControllerParams(
                     subject: .url(link),
@@ -1846,7 +1845,7 @@ private final class GiftAuctionBidScreenComponent: Component {
                 self?.share()
             })))
 
-            let contextController = makeContextController(presentationData: presentationData, source: .reference(GiftViewContextReferenceContentSource(controller: controller, sourceView: view)), items: .single(ContextController.Items(content: .list(items))), gesture: gesture)
+            let contextController = makeContextController(presentationData: presentationData, source: .reference(GiftViewContextReferenceContentSource(controller: controller, sourceView: (view as? GlassBarButtonComponent.View)?.menuSourceView ?? view)), items: .single(ContextController.Items(content: .list(items))), gesture: gesture)
             controller.presentInGlobalOverlay(contextController)
         }
         
@@ -2108,8 +2107,9 @@ private final class GiftAuctionBidScreenComponent: Component {
                         }
                     }
                     
-                    if case .finished = auctionState?.auctionState, let controller = self.environment?.controller() {
+                    if case .finished = auctionState?.auctionState, !self.didHandleFinishedAuction, let controller = self.environment?.controller() {
                         if let navigationController = controller.navigationController as? NavigationController {
+                            self.didHandleFinishedAuction = true
                             controller.dismiss()
                             let auctionController = context.sharedContext.makeGiftAuctionViewScreen(context: context, auctionContext: auctionContext, peerId: nil, completion: { _, _ in })
                             navigationController.pushViewController(auctionController)
@@ -2752,8 +2752,7 @@ private final class GiftAuctionBidScreenComponent: Component {
                             ),
                             color: environment.theme.chat.inputPanel.panelControlColor,
                             size: CGSize(width: 34.0, height: 34.0),
-                            playOnce: self.moreButtonPlayOnce,
-                            lottieSettings: component.context.lottieRenderingSettings
+                            playOnce: self.moreButtonPlayOnce
                         )
                     )),
                     action: { [weak self] view in

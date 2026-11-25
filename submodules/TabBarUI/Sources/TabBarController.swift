@@ -90,6 +90,14 @@ open class TabBarControllerImpl: ViewController, TabBarController {
         return self.currentController?.navigationBar
     }
     
+    override public var navigationBarTransitionSource: NavigationBarTransitionSource? {
+        return self.currentController?.navigationBarTransitionSource
+    }
+
+    override public func navigationExpansionSource(above controller: ViewController, operation: NavigationExpansionOperation) -> NavigationExpansionSource? {
+        return self.currentController?.navigationExpansionSource(above: controller, operation: operation)
+    }
+    
     private let pendingControllerDisposable = MetaDisposable()
     
     private var theme: PresentationTheme
@@ -364,6 +372,15 @@ open class TabBarControllerImpl: ViewController, TabBarController {
         if let layout = self.validLayout {
             self.containerLayoutUpdated(layout, transition: transition)
         }
+    }
+    
+    // Along the bottom unless its layout places it at a side. A bar hidden for a moment (search, selection) still counts,
+    // so that what lines up with it does not move meanwhile.
+    override open var showsBottomTabBar: Bool {
+        guard let layout = self.validLayout else {
+            return false
+        }
+        return self.tabBarControllerNode.sidePlacement(for: layout) == nil
     }
     
     override open func containerLayoutUpdated(_ layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {

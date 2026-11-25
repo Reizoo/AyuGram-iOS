@@ -12,11 +12,17 @@ public final class NavigationControllerTheme {
     public let statusBar: NavigationStatusBarStyle
     public let navigationBar: NavigationBarTheme
     public let emptyAreaColor: UIColor
+    /// The line between a split view's columns.
+    public let separatorColor: UIColor
+    /// A minimized app's header.
+    public let opaqueBackgroundColor: UIColor
     
-    public init(statusBar: NavigationStatusBarStyle, navigationBar: NavigationBarTheme, emptyAreaColor: UIColor) {
+    public init(statusBar: NavigationStatusBarStyle, navigationBar: NavigationBarTheme, emptyAreaColor: UIColor, separatorColor: UIColor, opaqueBackgroundColor: UIColor) {
         self.statusBar = statusBar
         self.navigationBar = navigationBar
         self.emptyAreaColor = emptyAreaColor
+        self.separatorColor = separatorColor
+        self.opaqueBackgroundColor = opaqueBackgroundColor
     }
 }
 
@@ -843,6 +849,8 @@ open class NavigationController: UINavigationController, ContainableController, 
         let isLandscape = layout.orientation == .landscape
         var hasVisibleStandaloneModal = false
         var topModalDismissProgress: CGFloat = 0.0
+        // iPhone Duo: the topmost card whose frame covers the status bar's corner block.
+        var statusCornerModalContainer: NavigationModalContainer?
         
         for i in (0 ..< navigationLayout.modal.count).reversed() {
             let modalContainer = self.modalContainers[i]
@@ -960,6 +968,9 @@ open class NavigationController: UINavigationController, ContainableController, 
                     }
                 }
                 previousModalContainer = modalContainer
+                if statusCornerModalContainer == nil, !modalContainer.isFlat, let cardFrame = modalContainer.presentedCardFrame, layout.coversStatusCorner(frame: cardFrame) {
+                    statusCornerModalContainer = modalContainer
+                }
                 if isStandaloneModal {
                     switch modalContainer.container.statusBarStyle {
                     case .Hide:
@@ -1128,10 +1139,12 @@ open class NavigationController: UINavigationController, ContainableController, 
             }
         }
         
+        var rootStatusBarStyle: StatusBarStyle = .Ignore
         if let rootContainer = self.rootContainer {
             switch rootContainer {
             case let .flat(container):
                 statusBarStyle = container.statusBarStyle
+                rootStatusBarStyle = container.statusBarStyle
                 self.globalScrollToTopNode?.isHidden = false
             case .split:
                 self.globalScrollToTopNode?.isHidden = true
@@ -1149,7 +1162,7 @@ open class NavigationController: UINavigationController, ContainableController, 
         case .compact:
             // Beside a status island (iPhone Duo, unfolded portrait) the screens behind a modal stay where they are:
             // no slide back into a framed card, so no black frame above the modal either; the modal dims them.
-            if (visibleModalCount != 0 || !modalStyleOverlayTransitionFactor.isZero) && layout.topBarStatusIsland == nil {
+            if (visibleModalCount != 0 || !modalStyleOverlayTransitionFactor.isZero) && layout.topBarStatusIsland == nil && !self.keepsRootInPlaceUnderModals {
                 let effectiveRootModalDismissProgress: CGFloat
                 let visibleRootModalDismissProgress: CGFloat
                 var additionalModalFrameProgress: CGFloat
@@ -1245,9 +1258,7 @@ open class NavigationController: UINavigationController, ContainableController, 
             } else {
                 if let rootModalFrame = self.rootModalFrame {
                     self.rootModalFrame = nil
-                    rootModalFrame.updateDismissal(transition: transition, progress: 1.0, additionalProgress: 0.0, completion: { [weak rootModalFrame] in
-                        rootModalFrame?.removeFromSupernode()
-                    })
+                    rootModalFrame.dismissAndRemove(transition: transition)
                 }
                 if let rootContainer = self.rootContainer {
                     var rootContainerNode: ASDisplayNode
@@ -1277,6 +1288,22 @@ open class NavigationController: UINavigationController, ContainableController, 
                 }
                 ContainedViewLayoutTransition.immediate.updateSublayerTransformScaleAndOffset(node: rootContainerNode, scale: 1.0, offset: CGPoint())
             }
+        }
+        
+        // iPhone Duo: the status bar is a block in a corner beside the side strip, so it shows over whatever covers that
+        // block. That is a modal's card while the card covers the block (not the dark frame the card path above assumes
+        // over a card), then the screens behind once an interactive dismiss has moved the card off the block.
+        if layout.statusBarIsInCorner && layout.topBarStatusIsland == nil && (visibleModalCount != 0 || !modalStyleOverlayTransitionFactor.isZero || statusCornerModalContainer != nil) {
+            if let statusCornerModalContainer {
+                let modalStatusBarStyle = statusCornerModalContainer.container.statusBarStyle
+                if case .Hide = modalStatusBarStyle {
+                    statusBarHidden = true
+                }
+                statusBarStyle = modalStatusBarStyle
+            } else {
+                statusBarStyle = rootStatusBarStyle
+            }
+            animateStatusBarStyleTransition = true
         }
         
         if let minimizedContainer = self.minimizedContainer {
@@ -1444,6 +1471,7 @@ open class NavigationController: UINavigationController, ContainableController, 
         }
         
         self.updateWindowScrollToTopProxyViews(layout: layout)
+        self.updateModalAccessibility()
 
         self.isUpdatingContainers = false
         
@@ -1466,6 +1494,31 @@ open class NavigationController: UINavigationController, ContainableController, 
             } else {
                 externalCompletion()
             }
+        }
+    }
+    
+    /// VoiceOver reads only the topmost presented modal: what it covers (the root stack, lower modals) is hidden, as
+    /// UIKit does for a modal presentation. Overlay containers above the modals are not affected.
+    private func updateModalAccessibility() {
+        let topModalContainer = self.modalContainers.last(where: { $0.supernode != nil })
+        for modalContainer in self.modalContainers {
+            let isHidden = topModalContainer != nil && modalContainer !== topModalContainer
+            if modalContainer.accessibilityElementsHidden != isHidden {
+                modalContainer.accessibilityElementsHidden = isHidden
+            }
+        }
+        let isRootHidden = topModalContainer != nil
+        let rootNode: ASDisplayNode?
+        switch self.rootContainer {
+        case let .flat(flatContainer):
+            rootNode = flatContainer
+        case let .split(splitContainer):
+            rootNode = splitContainer
+        case .none:
+            rootNode = nil
+        }
+        if let rootNode, rootNode.accessibilityElementsHidden != isRootHidden {
+            rootNode.accessibilityElementsHidden = isRootHidden
         }
     }
     
@@ -1566,6 +1619,37 @@ open class NavigationController: UINavigationController, ContainableController, 
         self.setViewControllers(controllers, animated: animated)
     }
     
+    private var verticalExpansionPopContainer: NavigationContainer?
+
+    /// The bar part of a push or pop ends at once, running or only its glass still animating above the bar it ended on:
+    /// for a screen about to move a bar away, which the transition's glass would not follow.
+    public func endNavigationBarTransitionNow() {
+        if let rootContainer = self.rootContainer, case let .flat(container) = rootContainer {
+            container.endNavigationBarTransitionNow()
+        }
+    }
+
+    public func beginVerticalExpansionPop(from controller: ViewController, anchor: CGPoint) -> Bool {
+        guard let rootContainer = self.rootContainer, case let .flat(container) = rootContainer, container.controllers.last === controller else {
+            return false
+        }
+        guard container.beginVerticalExpansionPop(anchor: anchor) else {
+            return false
+        }
+        self.verticalExpansionPopContainer = container
+        return true
+    }
+
+    public func updateVerticalExpansionPop(translation: CGPoint) {
+        self.verticalExpansionPopContainer?.updateVerticalExpansionPop(translation: translation)
+    }
+
+    public func endVerticalExpansionPop(translation: CGPoint, velocity: CGPoint, isCancelled: Bool) {
+        let container = self.verticalExpansionPopContainer
+        self.verticalExpansionPopContainer = nil
+        container?.endVerticalExpansionPop(translation: translation, velocity: velocity, isCancelled: isCancelled)
+    }
+
     public func filterController(_ controller: ViewController, animated: Bool) {
         let controllers = self.viewControllers.filter({ $0 !== controller })
         if controllers.count != self.viewControllers.count {
@@ -1780,6 +1864,7 @@ open class NavigationController: UINavigationController, ContainableController, 
     }
     
     public var _keepModalDismissProgress = false
+    public var keepsRootInPlaceUnderModals = false
     public func presentOverlay(controller: ViewController, inGlobal: Bool = false, blockInteraction: Bool = false) {
         let container = NavigationOverlayContainer(controller: controller, blocksInteractionUntilReady: blockInteraction, controllerRemoved: { [weak self] controller in
             guard let strongSelf = self else {

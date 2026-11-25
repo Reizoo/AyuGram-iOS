@@ -336,9 +336,10 @@ public class InfoItemNode: ListViewItemNode {
                 if let strongSelf = self {
                     strongSelf.item = item
                     
-                    strongSelf.accessibilityLabel = "\(item.title)\n\(attributedText.string)"
                     strongSelf.activateArea.frame = CGRect(origin: CGPoint(x: params.leftInset, y: 0.0), size: CGSize(width: params.width - params.leftInset - params.rightInset, height: layout.contentSize.height))
-                    strongSelf.activateArea.accessibilityLabel = strongSelf.accessibilityLabel
+                    // The text element reads the item; the node is only its container (a container label was read as
+                    // a second copy of the same text). An empty title adds no blank line.
+                    strongSelf.activateArea.accessibilityLabel = [item.title, attributedText.string].filter { !$0.isEmpty }.joined(separator: "\n")
                 
                     if let _ = updatedTheme {
                         strongSelf.topStripeNode.backgroundColor = itemSeparatorColor
@@ -374,9 +375,12 @@ public class InfoItemNode: ListViewItemNode {
                                 hasTopCorners = true
                                 strongSelf.topStripeNode.isHidden = hasCorners || !item.hasDecorations
                         }
-                    } else if case .blocks = item.style, case .glass = item.systemStyle {
+                    } else {
+                        // A standalone info item (the contact list's access notice) draws no separator above itself.
                         strongSelf.topStripeNode.isHidden = true
-                        hasTopCorners = true
+                        if case .blocks = item.style, case .glass = item.systemStyle {
+                            hasTopCorners = true
+                        }
                     }
                     let bottomStripeInset: CGFloat
                     if let neighbors = neighbors {

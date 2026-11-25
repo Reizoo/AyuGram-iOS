@@ -464,6 +464,17 @@ final class ThemeAccentColorControllerNode: ASDisplayNode, ASScrollViewDelegate 
         self.backgroundNode.update(wallpaper: self.wallpaper, animated: false)
         self.backgroundNode.updateBubbleTheme(bubbleTheme: self.theme, bubbleCorners: self.presentationData.chatBubbleCorners)
 
+        // Without bubbles a theme's colours are previewed as the chats will show them: recoloured, on the plain page.
+        var bubblelessPreview = false
+        if !bubbleCorners.bubbleMode {
+            switch mode {
+            case .colors, .edit:
+                bubblelessPreview = true
+            case .background:
+                break
+            }
+        }
+        
         self.stateDisposable = (self.statePromise.get()
         |> deliverOn(self.queue)
         |> mapToThrottled { next -> Signal<ThemeColorState, NoError> in
@@ -518,7 +529,7 @@ final class ThemeAccentColorControllerNode: ASDisplayNode, ASScrollViewDelegate 
             }
 
             let serviceBackgroundColor = serviceColor(for: (wallpaper, nil))
-            let updatedTheme: PresentationTheme?
+            var updatedTheme: PresentationTheme?
 
             if !updateOnlyWallpaper {
                 if let themeReference = mode.themeReference {
@@ -527,6 +538,11 @@ final class ThemeAccentColorControllerNode: ASDisplayNode, ASScrollViewDelegate 
                     updatedTheme = customizePresentationTheme(theme, editing: false, accentColor: accentColor.color, outgoingAccentColor: outgoingAccentColor?.color, backgroundColors: backgroundColors.map { $0.rgb }, bubbleColors: messagesColors.map { $0.rgb }, animateBubbleColors: state.animateMessageColors)
                 } else {
                     updatedTheme = theme
+                }
+                
+                if bubblelessPreview, let previewTheme = updatedTheme {
+                    updatedTheme = bubblelessPresentationTheme(previewTheme)
+                    wallpaper = bubblelessChatWallpaper(theme: previewTheme)
                 }
 
                 let _ = PresentationResourcesChat.principalGraphics(theme: updatedTheme!, wallpaper: wallpaper, bubbleCorners: bubbleCorners)
@@ -1092,7 +1108,7 @@ final class ThemeAccentColorControllerNode: ASDisplayNode, ASScrollViewDelegate 
         sampleMessages.append(message8)
         
         items = sampleMessages.reversed().map { message in
-            let item = self.context.sharedContext.makeChatMessagePreviewItem(context: self.context, messages: [message], theme: self.theme, strings: self.presentationData.strings, wallpaper: self.wallpaper, fontSize: self.presentationData.chatFontSize, chatBubbleCorners: self.presentationData.chatBubbleCorners, dateTimeFormat: self.presentationData.dateTimeFormat, nameOrder: self.presentationData.nameDisplayOrder, forcedResourceStatus: !message.media.isEmpty ? FileMediaResourceStatus(mediaStatus: .playbackStatus(.paused), fetchStatus: .Local) : nil, tapMessage: { [weak self] message in
+            let item = self.context.sharedContext.makeChatMessagePreviewItem(context: self.context, messages: [EngineMessage(message)], theme: self.theme, strings: self.presentationData.strings, wallpaper: self.wallpaper, fontSize: self.presentationData.chatFontSize, chatBubbleCorners: self.presentationData.chatBubbleCorners, dateTimeFormat: self.presentationData.dateTimeFormat, nameOrder: self.presentationData.nameDisplayOrder, forcedResourceStatus: !message.media.isEmpty ? FileMediaResourceStatus(mediaStatus: .playbackStatus(.paused), fetchStatus: .Local) : nil, tapMessage: { [weak self] message in
                 guard let strongSelf = self else {
                     return
                 }
@@ -1103,7 +1119,7 @@ final class ThemeAccentColorControllerNode: ASDisplayNode, ASScrollViewDelegate 
                     return state
                 }, animated: true)
             }, clickThroughMessage: { _, _ in
-            }, backgroundNode: self.backgroundNode, availableReactions: nil, accountPeer: nil, isCentered: false, isPreview: true, isStandalone: false, rank: nil, rankRole: nil, isGiftMessageComposerPreview: false)
+            }, backgroundNode: self.backgroundNode, availableReactions: nil, accountPeer: nil, isCentered: false, isPreview: true, isStandalone: false, rank: nil, rankRole: nil, isGiftMessageComposerPreview: false, activateGiftMessageInput: nil)
             return item
         }
         

@@ -28,6 +28,22 @@ final class NavigationModalContainer: ASDisplayNode, ASScrollViewDelegate, ASGes
     private var validLayout: ContainerViewLayout?
     private var horizontalDismissOffset: CGFloat?
     
+    /// The card's frame now, in this container's coordinates: where `update` placed it, moved by an interactive dismiss
+    /// (down with the scroll, aside with the edge pan). Nil before the first layout.
+    var presentedCardFrame: CGRect? {
+        guard let layout = self.validLayout else {
+            return nil
+        }
+        // The card sits one screen down in the scroll content, which rests scrolled one screen down.
+        var frame = self.container.frame.offsetBy(dx: 0.0, dy: -layout.size.height)
+        if let horizontalDismissOffset = self.horizontalDismissOffset {
+            frame.origin.x += horizontalDismissOffset
+        } else {
+            frame.origin.y += self.dismissProgress * layout.size.height
+        }
+        return frame
+    }
+    
     var keyboardViewManager: KeyboardViewManager? {
         didSet {
             if self.keyboardViewManager !== oldValue {
@@ -432,7 +448,7 @@ final class NavigationModalContainer: ASDisplayNode, ASScrollViewDelegate, ASGes
                     effectiveStatusBarHeight = nil
                 }
                 
-                containerLayout = ContainerViewLayout(size: CGSize(width: layout.size.width, height: layout.size.height - topInset), metrics: layout.metrics, deviceMetrics: layout.deviceMetrics, intrinsicInsets: UIEdgeInsets(top: 0.0, left: layout.intrinsicInsets.left, bottom: layout.intrinsicInsets.bottom, right: layout.intrinsicInsets.right), safeInsets: UIEdgeInsets(top: 0.0, left: layout.safeInsets.left, bottom: layout.safeInsets.bottom, right: layout.safeInsets.right), reservedCorners: layout.reservedCorners.offsettingTop(by: topInset), division: nil, additionalInsets: layout.additionalInsets, statusBarHeight: effectiveStatusBarHeight, inputHeight: layout.inputHeight, inputHeightIsInteractivellyChanging: layout.inputHeightIsInteractivellyChanging, inVoiceOver: layout.inVoiceOver, presentedInFormSheet: false)
+                containerLayout = ContainerViewLayout(size: CGSize(width: layout.size.width, height: layout.size.height - topInset), metrics: layout.metrics, deviceMetrics: layout.deviceMetrics, intrinsicInsets: UIEdgeInsets(top: 0.0, left: layout.intrinsicInsets.left, bottom: layout.intrinsicInsets.bottom, right: layout.intrinsicInsets.right), safeInsets: UIEdgeInsets(top: 0.0, left: layout.safeInsets.left, bottom: layout.safeInsets.bottom, right: layout.safeInsets.right), reservedCorners: layout.reservedCorners.offsettingTop(by: topInset), division: layout.division.map { $0.offsetBy(dx: 0.0, dy: -topInset) }, additionalInsets: layout.additionalInsets, statusBarHeight: effectiveStatusBarHeight, inputHeight: layout.inputHeight, inputHeightIsInteractivellyChanging: layout.inputHeightIsInteractivellyChanging, inVoiceOver: layout.inVoiceOver, presentedInFormSheet: false)
                 // Beside a status island (iPhone Duo, unfolded portrait) a modal covered by another one stays where it
                 // is rather than sliding back.
                 let coveredByModalTransition: CGFloat = layout.topBarStatusIsland != nil ? 0.0 : coveredByModalTransition

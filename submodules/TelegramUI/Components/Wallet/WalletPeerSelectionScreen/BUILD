@@ -12,7 +12,6 @@ swift_library(
     deps = [
         "//submodules/TelegramUI/Components/SideColumnLayout",
         "//submodules/AccountContext",
-        "//submodules/LottieSettings:LottieSettings",
         "//submodules/AppBundle",
         "//submodules/AsyncDisplayKit",
         "//submodules/ComponentFlow",
@@ -22,6 +21,7 @@ swift_library(
         "//submodules/Components/MultilineTextComponent",
         "//submodules/Components/ViewControllerComponent",
         "//submodules/ContactsPeerItem",
+        "//submodules/ContactListUI",
         "//submodules/Display",
         "//submodules/ItemListUI",
         "//submodules/MergeLists",
@@ -34,6 +34,7 @@ swift_library(
         "//submodules/PresentationDataUtils",
         "//submodules/TelegramUI/Components/ButtonComponent",
         "//submodules/TelegramUI/Components/ChatListHeaderComponent",
+        "//submodules/TelegramUI/Components/NavigationBarComponent",
         "//submodules/TelegramUI/Components/GlassBackgroundComponent",
         "//submodules/TelegramUI/Components/LottieComponent",
         "//submodules/TelegramUI/Components/Wallet/WalletSendScreen",

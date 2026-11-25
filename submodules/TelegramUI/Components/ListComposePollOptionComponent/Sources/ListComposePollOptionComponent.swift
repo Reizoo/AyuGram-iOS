@@ -1,5 +1,4 @@
 import Foundation
-import LottieSettings
 import UIKit
 import Display
 import AsyncDisplayKit
@@ -1028,7 +1027,7 @@ public final class ListComposePollOptionComponent: Component {
                         if updateMedia {
                             imageNode.setSignal(chatMessagePhoto(postbox: component.context.account.postbox, userLocation: .other, photoReference: .webPage(webPage: WebpageReference(webpage), media: image)))
                             if let representation = smallestImageRepresentation(image.representations) {
-                                let _ = fetchedMediaResource(mediaBox: component.context.account.postbox.mediaBox, userLocation: .other, userContentType: .image, reference: .media(media: .webPage(webPage: WebpageReference(webpage), media: image), resource: representation.resource)).startStandalone()
+                                let _ = component.context.engine.resources.fetch(reference: .media(media: .webPage(webPage: WebpageReference(webpage), media: image), resource: representation.resource), userLocation: .other, userContentType: .image).startStandalone()
                             }
                         }
                         webpageIconTintColor = .white
@@ -1223,8 +1222,7 @@ public final class ListComposePollOptionComponent: Component {
                                 name: animationName
                             ),
                             color: component.theme.chat.inputPanel.inputControlColor.blitOver(component.theme.list.itemBlocksBackgroundColor, alpha: 1.0),
-                            size: modeSelectorSize,
-                            lottieSettings: component.context.lottieRenderingSettings
+                            size: modeSelectorSize
                         )),
                         effectAlignment: .center,
                         action: { [weak self] in
@@ -1233,7 +1231,10 @@ public final class ListComposePollOptionComponent: Component {
                             }
                             component.toggleInputMode?()
                         },
-                        animateScale: false
+                        animateScale: false,
+                        // VoiceOver: the glyph shows what a tap switches to (the emoji face while typing, the keyboard
+                        // while the emoji panel is up), so it is named after that.
+                        accessibility: ComponentAccessibility(label: inputMode == .keyboard ? component.strings.EmojiInput_TabEmoji : component.strings.VoiceOver_Keyboard)
                     )),
                     environment: {},
                     containerSize: modeSelectorSize

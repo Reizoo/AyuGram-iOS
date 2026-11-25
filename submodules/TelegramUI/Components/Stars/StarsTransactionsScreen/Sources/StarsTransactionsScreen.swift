@@ -78,6 +78,20 @@ final class StarsTransactionsScreenComponent: Component {
     }
     
     private final class ScrollViewImpl: UIScrollView {
+        /// VoiceOver: the content top to bottom (the transactions container starts at the top of the content).
+        var accessibilityOrder: (() -> [UIView])?
+        
+        override var accessibilityElements: [Any]? {
+            get {
+                if let accessibilityOrder = self.accessibilityOrder {
+                    return accessibilityOrder().filter { $0.superview === self }
+                }
+                return super.accessibilityElements
+            } set(value) {
+                super.accessibilityElements = value
+            }
+        }
+        
         override func touchesShouldCancel(in view: UIView) -> Bool {
             return true
         }
@@ -182,6 +196,20 @@ final class StarsTransactionsScreenComponent: Component {
             self.addSubview(self.scrollView)
             
             self.scrollView.addSubview(self.scrollContainerView)
+            self.scrollView.accessibilityOrder = { [weak self] in
+                guard let self else {
+                    return []
+                }
+                return [
+                    self.starView.view,
+                    self.descriptionView.view,
+                    self.proceedsView.view,
+                    self.balanceView.view,
+                    self.earnStarsSection.view,
+                    self.subscriptionsView.view,
+                    self.scrollContainerView
+                ].compactMap { $0 }
+            }
 
             self.topEdgeEffectView.alpha = 0.0
             self.topEdgeEffectView.isUserInteractionEnabled = false
@@ -556,7 +584,9 @@ final class StarsTransactionsScreenComponent: Component {
             if let titleView = self.titleView.view {
                 if titleView.superview == nil {
                     if let navigationBar = environment.controller()?.navigationBar {
-                        navigationBar.view.insertSubview(titleView, aboveSubview: navigationBar.backgroundView)
+                        // The page title ("Telegram Stars", "Gram Balance").
+                        titleView.accessibilityTraits = .header
+                        navigationBar.customOverBackgroundContentView.insertSubview(titleView, at: 0)
                     }
                 }
                 starTransition.setBounds(view: titleView, bounds: CGRect(origin: .zero, size: titleSize))
@@ -615,9 +645,9 @@ final class StarsTransactionsScreenComponent: Component {
                     topBalanceTitleView.alpha = 0.0
                     if let navigationBar = environment.controller()?.navigationBar {
                         if let titleView = self.titleView.view, titleView.superview != nil {
-                            navigationBar.view.insertSubview(topBalanceTitleView, aboveSubview: titleView)
+                            navigationBar.customOverBackgroundContentView.insertSubview(topBalanceTitleView, aboveSubview: titleView)
                         } else {
-                            navigationBar.view.insertSubview(topBalanceTitleView, aboveSubview: navigationBar.backgroundView)
+                            navigationBar.customOverBackgroundContentView.insertSubview(topBalanceTitleView, at: 0)
                         }
                     }
                 }
@@ -630,9 +660,9 @@ final class StarsTransactionsScreenComponent: Component {
                     topBalanceValueView.alpha = 0.0
                     if let navigationBar = environment.controller()?.navigationBar {
                         if let titleView = self.titleView.view, titleView.superview != nil {
-                            navigationBar.view.insertSubview(topBalanceValueView, aboveSubview: titleView)
+                            navigationBar.customOverBackgroundContentView.insertSubview(topBalanceValueView, aboveSubview: titleView)
                         } else {
-                            navigationBar.view.insertSubview(topBalanceValueView, aboveSubview: navigationBar.backgroundView)
+                            navigationBar.customOverBackgroundContentView.insertSubview(topBalanceValueView, at: 0)
                         }
                     }
                 }
@@ -648,9 +678,9 @@ final class StarsTransactionsScreenComponent: Component {
                     topBalanceIconView.alpha = 0.0
                     if let navigationBar = environment.controller()?.navigationBar {
                         if let titleView = self.titleView.view, titleView.superview != nil {
-                            navigationBar.view.insertSubview(topBalanceIconView, aboveSubview: titleView)
+                            navigationBar.customOverBackgroundContentView.insertSubview(topBalanceIconView, aboveSubview: titleView)
                         } else {
-                            navigationBar.view.insertSubview(topBalanceIconView, aboveSubview: navigationBar.backgroundView)
+                            navigationBar.customOverBackgroundContentView.insertSubview(topBalanceIconView, at: 0)
                         }
                     }
                 }

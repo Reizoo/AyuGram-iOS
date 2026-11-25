@@ -36,6 +36,7 @@ public class ContactListActionItem: ListViewItem, ListViewItemWithHeader {
     let highlight: ContactListActionItemHighlight
     let clearHighlightAutomatically: Bool
     let accessible: Bool
+    let hideBackground: Bool
     let action: () -> Void
     public let header: ListViewItemHeader?
 
@@ -43,7 +44,8 @@ public class ContactListActionItem: ListViewItem, ListViewItemWithHeader {
         return AnyEquatable(HeaderNeighborDescriptor(headerId: self.header?.id, headerFamily: .contactList))
     }
     
-    public init(presentationData: ItemListPresentationData, style: ItemListStyle = .plain, systemStyle: ItemListSystemStyle = .legacy, title: String, subtitle: String? = nil, icon: ContactListActionItemIcon, actionStyle: Style = .accent, height: Height = .generic, highlight: ContactListActionItemHighlight = .cell, clearHighlightAutomatically: Bool = true, accessible: Bool = true, header: ListViewItemHeader?, action: @escaping () -> Void) {
+    public init(presentationData: ItemListPresentationData, style: ItemListStyle = .plain, systemStyle: ItemListSystemStyle = .legacy, title: String, subtitle: String? = nil, icon: ContactListActionItemIcon, actionStyle: Style = .accent, height: Height = .generic, highlight: ContactListActionItemHighlight = .cell, clearHighlightAutomatically: Bool = true, accessible: Bool = true, hideBackground: Bool = false, header: ListViewItemHeader?, action: @escaping () -> Void) {
+        self.hideBackground = hideBackground
         self.presentationData = presentationData
         self.style = style
         self.systemStyle = systemStyle
@@ -180,6 +182,7 @@ class ContactListActionItemNode: ListViewItemNode {
         self.highlightedBackgroundNode.isLayerBacked = true
         
         self.activateArea = AccessibilityAreaNode()
+        self.activateArea.accessibilityTraits = .button
         
         super.init(layerBacked: false)
         
@@ -260,12 +263,13 @@ class ContactListActionItemNode: ListViewItemNode {
                     strongSelf.item = item
                     
                     strongSelf.activateArea.accessibilityLabel = item.title
+                    strongSelf.activateArea.accessibilityValue = item.subtitle
                     strongSelf.activateArea.frame = CGRect(origin: CGPoint(x: params.leftInset, y: 0.0), size: CGSize(width: layout.contentSize.width - params.leftInset - params.rightInset, height: layout.contentSize.height))
                     
                     if let _ = updatedTheme {
                         strongSelf.topStripeNode.backgroundColor = item.presentationData.theme.list.itemPlainSeparatorColor
                         strongSelf.bottomStripeNode.backgroundColor = item.presentationData.theme.list.itemPlainSeparatorColor
-                        strongSelf.backgroundNode.backgroundColor = item.presentationData.theme.list.plainBackgroundColor
+                        strongSelf.backgroundNode.backgroundColor = item.hideBackground ? .clear : item.presentationData.theme.list.plainBackgroundColor
                         strongSelf.highlightedBackgroundNode.backgroundColor = item.presentationData.theme.list.itemHighlightedBackgroundColor
                         
                         if case .generic = item.actionStyle {
@@ -337,7 +341,9 @@ class ContactListActionItemNode: ListViewItemNode {
                     // and the highlight stop at it instead of running under it. Equal insets give today's frames.
                     let stripExcessLeft = max(0.0, params.leftInset - params.rightInset)
                     let stripExcessRight = max(0.0, params.rightInset - params.leftInset)
-                    strongSelf.bottomStripeNode.frame = CGRect(origin: CGPoint(x: leftInset, y: contentSize.height - separatorHeight), size: CGSize(width: params.width - leftInset - stripExcessRight, height: separatorHeight))
+                    // Glass rows end their separator 16pt short of the edge, as the contact rows below do.
+                    let separatorRightInset: CGFloat = (item.systemStyle == .glass ? 16.0 : 0.0) + stripExcessRight
+                    strongSelf.bottomStripeNode.frame = CGRect(origin: CGPoint(x: leftInset, y: contentSize.height - separatorHeight), size: CGSize(width: params.width - leftInset - separatorRightInset, height: separatorHeight))
                     
                     let titleFrame: CGRect
                     if subtitleAttributedString != nil {

@@ -1,5 +1,4 @@
 import Foundation
-import LottieSettings
 import UIKit
 import Display
 import AccountContext
@@ -41,11 +40,9 @@ private final class CommunityRequestsEmptyPlaceholderView: UIView {
     private let title = ComponentView<Empty>()
     private let text = ComponentView<Empty>()
 
-    private let lottieSettings: LottieRenderingSettings
 
-    init(frame: CGRect, lottieSettings: LottieRenderingSettings) {
-        self.lottieSettings = lottieSettings
-        self.animationNode = DefaultAnimatedStickerNodeImpl(lottieSettings: lottieSettings)
+    override init(frame: CGRect) {
+        self.animationNode = DefaultAnimatedStickerNodeImpl()
         self.animationNode.setup(
             source: AnimatedStickerNodeLocalFileSource(name: "TwoFactorSetupRememberSuccess"),
             width: 192,
@@ -251,12 +248,12 @@ private final class CommunityRequestsScreenComponent: Component {
         }
 
         private func updateScrolling(transition: ComponentTransition) {
-            guard let environment = self.environment, let controller = environment.controller(), let navigationBar = controller.navigationBar, let edgeEffectView = navigationBar.edgeEffectView else {
+            guard let environment = self.environment, let controller = environment.controller(), let navigationBar = controller.navigationBar else {
                 return
             }
             let alphaDistance: CGFloat = 16.0
             let edgeEffectAlpha = max(0.0, min(1.0, self.scrollView.contentOffset.y / alphaDistance))
-            transition.setAlpha(view: edgeEffectView, alpha: edgeEffectAlpha)
+            navigationBar.setBackdropAlpha(edgeEffectAlpha, transition: transition.containedViewLayoutTransition)
         }
 
         private var rows: [CommunityRequestRow] {
@@ -817,7 +814,7 @@ private final class CommunityRequestsScreenComponent: Component {
                     } else {
                         emptyPlaceholderTransition = .immediate
                         
-                        emptyPlaceholderView = CommunityRequestsEmptyPlaceholderView(frame: CGRect(), lottieSettings: component.context.lottieRenderingSettings)
+                        emptyPlaceholderView = CommunityRequestsEmptyPlaceholderView(frame: CGRect())
                         emptyPlaceholderView.alpha = 0.0
                         self.emptyPlaceholderView = emptyPlaceholderView
                         self.scrollView.addSubview(emptyPlaceholderView)

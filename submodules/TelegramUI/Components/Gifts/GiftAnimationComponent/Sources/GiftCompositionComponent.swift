@@ -1,5 +1,4 @@
 import Foundation
-import LottieSettings
 import UIKit
 import Display
 import SwiftSignalKit
@@ -182,6 +181,13 @@ public final class GiftCompositionComponent: Component {
             self.previewTimer?.invalidate()
         }
         
+        private var modelHidden = false
+
+        public func setModelHidden(_ hidden: Bool) {
+            self.modelHidden = hidden
+            self.animationNode?.view.isHidden = hidden
+        }
+
         @objc private func handleTap() {
             guard let animationNode = animationNode as? DefaultAnimatedStickerNodeImpl else { return }
             if case .once = animationNode.playbackMode, !animationNode.isPlaying {
@@ -231,7 +237,7 @@ public final class GiftCompositionComponent: Component {
                 return
             }
 
-            let node = DefaultAnimatedStickerNodeImpl(lottieSettings: self.component!.context.lottieRenderingSettings)
+            let node = DefaultAnimatedStickerNodeImpl()
             node.isUserInteractionEnabled = false
             let pathPrefix = self.component!.context.engine.resources.shortLivedResourceCachePathPrefix(id: EngineMediaResource.Id(file.resource.id))
             node.setup(
@@ -350,7 +356,7 @@ public final class GiftCompositionComponent: Component {
             for (i, attribute) in tail.reversed().enumerated() {
                 guard case let .model(_, file, _, _) = attribute else { continue }
 
-                let node = DefaultAnimatedStickerNodeImpl(lottieSettings: self.component!.context.lottieRenderingSettings)
+                let node = DefaultAnimatedStickerNodeImpl()
                 node.isUserInteractionEnabled = false
                 let pathPrefix = self.component!.context.engine.resources.shortLivedResourceCachePathPrefix(id: EngineMediaResource.Id(file.resource.id))
                 node.setup(
@@ -955,7 +961,7 @@ public final class GiftCompositionComponent: Component {
             
             if let file = animationFile, self.animationNode == nil {
                 animationTransition = .immediate
-                let node = DefaultAnimatedStickerNodeImpl(lottieSettings: component.context.lottieRenderingSettings)
+                let node = DefaultAnimatedStickerNodeImpl()
                 node.isUserInteractionEnabled = false
                 self.animationNode = node
                 self.addSubview(node.view)
@@ -987,6 +993,7 @@ public final class GiftCompositionComponent: Component {
                     size: size
                 )
                 animationNode.layer.bounds = CGRect(origin: .zero, size: iconSize)
+                animationNode.view.isHidden = self.modelHidden
                 animationTransition.setPosition(layer: animationNode.layer, position: animationFrame.center)
                 animationTransition.setScale(layer: animationNode.layer, scale: size.width / iconSize.width)
                 

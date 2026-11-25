@@ -12,6 +12,7 @@ import AccountContext
 import ContextUI
 import ComponentFlow
 import ComponentDisplayAdapters
+import GlassBackgroundComponent
 
 private extension ContextControllerTakeViewInfo.ContainingItem {
     var contentRect: CGRect {
@@ -414,6 +415,8 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
     private var hasActiveLiquidMorph = false
     private var liquidMorphReferenceInfo: ContextControllerReferenceViewInfo?
     private var liquidMorphReferenceRect: CGRect?
+    private var appliedActionsTopOverflow: CGFloat = 0.0
+    private var appliedTopPushedItemId: ObjectIdentifier?
     private let actionsStackNode: ContextControllerActionsStackNodeImpl
     private let additionalActionsStackNode: ContextControllerActionsStackNode
     
@@ -669,6 +672,9 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
     }
     
     func replaceItems(items: ContextController.Items, animated: Bool?) {
+        self.actionsStackNode.usesClearGlass = items.usesClearGlass
+        self.actionsStackNode.glassBlurRadius = items.glassBlurRadius
+        self.actionsStackNode.minimumListWidth = items.minimumListWidth
         if case .twoLists = items.content {
             let stackItems = makeContextControllerActionsStackItem(items: items)
             self.actionsStackNode.replace(item: stackItems.first!, animated: animated)
@@ -762,6 +768,8 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
             contentActionsSpacing += 3.0
         }
         
+        // Read before the scroller is resized, which may clamp its offset to the previous content.
+        let contentOffsetBeforeLayout = self.scroller.contentOffset
         transition.updateFrame(node: self.clippingNode, frame: CGRect(origin: CGPoint(), size: layout.size), beginWithCurrentState: true)
         if self.scrollNode.frame != CGRect(origin: CGPoint(), size: layout.size) {
             transition.updateFrame(node: self.scrollNode, frame: CGRect(origin: CGPoint(), size: layout.size), beginWithCurrentState: true)
@@ -834,11 +842,16 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
             if let current = self.reactionContextNode {
                 reactionContextNode = current
             } else {
+                var alignsToContentLeadingEdge = false
+                if case let .extracted(source) = self.source {
+                    if case .left = source.actionsHorizontalAlignment {
+                        alignsToContentLeadingEdge = true
+                    }
+                }
                 reactionContextNode = ReactionContextNode(
                     context: reactionItems.context,
                     animationCache: reactionItems.animationCache,
                     presentationData: presentationData,
-                    //style: .glass(isTinted: false),
                     items: reactionItems.reactionItems,
                     selectedItems: reactionItems.selectedReactionItems,
                     title: reactionItems.reactionsTitle,
@@ -867,6 +880,7 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
                     }
                 )
                 reactionContextNode.displayTail = !controller.hideReactionPanelTail
+                reactionContextNode.alignsToAnchorLeadingEdge = alignsToContentLeadingEdge
                 self.reactionContextNode = reactionContextNode
                 self.addSubnode(reactionContextNode)
                 
@@ -970,7 +984,7 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
         var liquidMorphSource: (container: UIView, sourceRect: CGRect, sourcePath: UIBezierPath?)?
         // A morphing menu takes the source's place: it shares the source's top edge (bottom
         // edge when growing upward) and the side edge nearest the screen edge.
-        var morphMenuAnchor: (sourceFrame: CGRect, growsUpward: Bool, alignsRight: Bool)?
+        var morphMenuAnchor: (sourceFrame: CGRect, growsUpward: Bool, alignsRight: Bool, centered: Bool)?
         
         switch self.source {
         case let .location(location):
@@ -988,6 +1002,8 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
                     var sourcePath = transitionInfo.sourcePath ?? ContextReferenceContentNode.sourcePath(for: referenceView)
                     if sourcePath == nil, let extractable = referenceView as? ContextExtractableContainer {
                         sourcePath = UIBezierPath(roundedRect: sourceRect, cornerRadius: extractable.normalState.cornerRadius)
+                    } else if sourcePath == nil, let glass = referenceView as? GlassBackgroundView, let outlinePath = glass.outlinePath {
+                        sourcePath = outlinePath
                     } else if sourcePath == nil, let mask = referenceView.layer.mask as? CAShapeLayer, let path = mask.path, CATransform3DIsAffine(mask.transform) {
                         var transform = CGAffineTransform(translationX: -mask.bounds.minX - mask.bounds.width * mask.anchorPoint.x, y: -mask.bounds.minY - mask.bounds.height * mask.anchorPoint.y)
                         transform = transform.concatenating(mask.affineTransform())
@@ -1011,7 +1027,16 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
                 }
                 // Keep the placement for the menu's lifetime even if the source stops opting in.
                 if liquidMorphSource != nil || self.hasActiveLiquidMorph {
-                    morphMenuAnchor = (referenceRect, transitionInfo.actionsPosition == .top, referenceRect.midX >= layout.size.width * 0.5)
+                    let alignsRight: Bool
+                    switch transitionInfo.morphedActionsAlignment {
+                    case .automatic:
+                        alignsRight = referenceRect.midX >= layout.size.width * 0.5
+                    case .leading:
+                        alignsRight = false
+                    case .trailing:
+                        alignsRight = true
+                    }
+                    morphMenuAnchor = (referenceRect, transitionInfo.actionsPosition == .top, alignsRight, transitionInfo.centersMorphedActions)
                 }
                 contentRect = referenceRect.insetBy(dx: -2.0, dy: 0.0)
                 contentRect.size.width += 5.0
@@ -1060,7 +1085,7 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
                 // strip. Elsewhere this is the regular width class.
                 if layout.presentsFloatingPanels {
                     if let transitionInfo = source.transitionInfo(), let (sourceView, sourceRect) = transitionInfo.sourceNode() {
-                        let sourcePoint = sourceView.convert(sourceRect.center, to: self.view)
+                        let sourcePoint = sourceView.convertAcrossWindows(sourceRect, to: self.view).center
                         
                         contentRect = CGRect(origin: CGPoint(x: sourcePoint.x - floor(contentSize.width * 0.5), y: sourcePoint.y - floor(contentSize.height * 0.5)), size: contentSize)
                         if contentRect.origin.x < 0.0 {
@@ -1274,8 +1299,13 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
                 totalActionsHeight += 10.0 + additionalActionsSize.height
             }
             
-            var actionsFrame: CGRect
+            var actionsAboveReference = false
             if case let .reference(source) = self.source, let actionsPosition = (source.transitionInfo() ?? self.liquidMorphReferenceInfo)?.actionsPosition, case .top = actionsPosition {
+                actionsAboveReference = true
+            }
+            
+            var actionsFrame: CGRect
+            if actionsAboveReference {
                 actionsFrame = CGRect(origin: CGPoint(x: actionsSideInset, y: contentRect.minY - contentActionsSpacing - totalActionsHeight), size: actionsSize)
             } else {
                 actionsFrame = CGRect(origin: CGPoint(x: actionsSideInset, y: contentRect.maxY + contentActionsSpacing), size: actionsSize)
@@ -1305,8 +1335,16 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
                     actionsFrame.origin.x = actionsEdgeInset
                 }
             } else {
+                // `.left`: the menu starts exactly where the content does, even closer to the screen edge than a menu
+                // goes otherwise, so the two read as one column.
+                var actionsMinX = actionsEdgeInset
+                if case .left = actionsHorizontalAlignment {
+                    actionsMinX = min(actionsEdgeInset, max(0.0, contentParentGlobalFrame.minX + contentRect.minX))
+                }
                 if case .location = self.source {
                     actionsFrame.origin.x = contentParentGlobalFrame.minX + contentRect.minX + actionsSideInset - 4.0
+                } else if case .left = actionsHorizontalAlignment {
+                    actionsFrame.origin.x = contentParentGlobalFrame.minX + contentRect.minX
                 } else if case .right = actionsHorizontalAlignment {
                     actionsFrame.origin.x = contentParentGlobalFrame.minX + contentRect.maxX - actionsSideInset - actionsSize.width - 1.0
                 } else {
@@ -1333,25 +1371,47 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
                 if actionsFrame.maxX > layout.size.width - actionsEdgeInset {
                     actionsFrame.origin.x = layout.size.width - actionsEdgeInset - actionsFrame.width
                 }
-                if actionsFrame.minX < actionsEdgeInset {
-                    actionsFrame.origin.x = actionsEdgeInset
+                if actionsFrame.minX < actionsMinX {
+                    actionsFrame.origin.x = actionsMinX
                 }
             }
             
             if let morphMenuAnchor {
                 let sourceFrame = morphMenuAnchor.sourceFrame
-                actionsFrame.origin.x = morphMenuAnchor.alignsRight ? sourceFrame.maxX - actionsFrame.width : sourceFrame.minX
+                if morphMenuAnchor.centered {
+                    actionsFrame.origin.x = floor((layout.size.width - actionsFrame.width) * 0.5)
+                } else {
+                    actionsFrame.origin.x = morphMenuAnchor.alignsRight ? sourceFrame.maxX - actionsFrame.width : sourceFrame.minX
+                }
                 actionsFrame.origin.x = max(actionsEdgeInset, min(layout.size.width - actionsEdgeInset - actionsFrame.width, actionsFrame.origin.x))
                 actionsFrame.origin.y = morphMenuAnchor.growsUpward ? sourceFrame.maxY - actionsFrame.height : sourceFrame.minY
             } else if case let .reference(reference) = self.source, let transitionInfo = reference.transitionInfo() ?? self.liquidMorphReferenceInfo, let customPosition = transitionInfo.customPosition {
                 actionsFrame = actionsFrame.offsetBy(dx: customPosition.x, dy: customPosition.y)
             }
             
+            // A menu that opens above its reference (a tab bar item, say) and is taller than the space above it would
+            // start above the screen, where the scroller cannot reach: its content only extends downward. Lay the menu
+            // out from the top inset instead and make the content taller by the overflow, so it opens scrolled to where
+            // it was and its top can be scrolled into view. A menu that morphs out of its source and grows upward (an
+            // editor's toolbar above the keyboard, a pushed submenu taller than the room above it) is handled alike; its
+            // additional actions stack above it, so they count towards its top. A pushed submenu opens scrolled to its top
+            // instead, so its Back row is in view (below).
+            var actionsTopOverflow: CGFloat = 0.0
+            var actionsMinY = contentTopInset
+            if let morphMenuAnchor, morphMenuAnchor.growsUpward, additionalActionsSize.height > 0.0 {
+                actionsMinY += additionalActionsSize.height + 10.0
+            }
+            if actionsAboveReference, actionsFrame.minY < actionsMinY {
+                actionsTopOverflow = actionsMinY - actionsFrame.minY
+                actionsFrame.origin.y = actionsMinY
+            }
+            
             // iPhone Duo: on a side with a side strip the menu stays out of the strip where a corner block (the
             // status corner) reaches its height, and may use the strip where none does (the input panel's band
-            // rule). Sides without a strip, and every other device, keep the edge clamp above.
+            // rule). Sides without a strip, and every other device, keep the edge clamp above. A menu that scrolls from
+            // above the top inset is checked over its whole range on screen, from where it opens to where it scrolls.
             do {
-                let band = layout.sideInsets(forBandFrom: actionsFrame.minY, to: actionsFrame.maxY + (additionalActionsSize.height > 0.0 ? additionalActionsSize.height + 10.0 : 0.0))
+                let band = layout.sideInsets(forBandFrom: actionsFrame.minY - actionsTopOverflow, to: actionsFrame.maxY + (additionalActionsSize.height > 0.0 ? additionalActionsSize.height + 10.0 : 0.0))
                 let stripLeft: CGFloat = layout.sideStrip(edge: .left) != nil ? band.left : 0.0
                 let stripRight: CGFloat = layout.sideStrip(edge: .right) != nil ? band.right : 0.0
                 if stripRight > 0.0, actionsFrame.maxX > layout.size.width - stripRight - actionsEdgeInset {
@@ -1367,7 +1427,12 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
             if additionalActionsSize.height > 0.0 {
                 if let morphMenuAnchor {
                     // The morphing stack stays on the source; the additional one follows it.
-                    let additionalX = morphMenuAnchor.alignsRight ? actionsFrame.maxX - additionalActionsSize.width : actionsFrame.minX
+                    let additionalX: CGFloat
+                    if morphMenuAnchor.centered {
+                        additionalX = floor((layout.size.width - additionalActionsSize.width) * 0.5)
+                    } else {
+                        additionalX = morphMenuAnchor.alignsRight ? actionsFrame.maxX - additionalActionsSize.width : actionsFrame.minX
+                    }
                     let additionalY = morphMenuAnchor.growsUpward ? actionsFrame.minY - 10.0 - additionalActionsSize.height : actionsFrame.maxY + 10.0
                     additionalActionsFrame = CGRect(origin: CGPoint(x: additionalX, y: additionalY), size: additionalActionsSize)
                 } else {
@@ -1443,8 +1508,15 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
             }
             
             let contentHeight: CGFloat
-            if self.actionsStackNode.topPositionLock != nil || self.currentReactionsPositionLock != nil {
+            if self.currentReactionsPositionLock != nil {
                 contentHeight = layout.size.height
+            } else if self.actionsStackNode.topPositionLock != nil {
+                // A pushed submenu keeps the top of the menu it replaced. When it is taller than the space below that
+                // (a long list of albums, say), extend the content past the screen as for an unlocked menu, so the
+                // scroller can reach its bottom items. A submenu that fits keeps the screen height.
+                contentHeight = max(layout.size.height, combinedActionsFrame.maxY + bottomInset + layout.intrinsicInsets.bottom)
+            } else if actionsTopOverflow > 0.0 {
+                contentHeight = layout.size.height + actionsTopOverflow
             } else {
                 if keepInPlace, case .extracted = self.source {
                     contentHeight = (layout.statusBarHeight ?? 0.0) + actionsFrame.height + abs(actionsFrame.minY) + bottomInset + layout.intrinsicInsets.bottom
@@ -1454,19 +1526,37 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
             }
             let contentSize = CGSize(width: layout.size.width, height: contentHeight)
             
-            if self.scroller.contentSize != contentSize {
+            // A submenu just pushed onto a menu above its reference that it overflows opens scrolled to its top, so its
+            // Back row is in view; the items nearest the reference are reached by scrolling. The root menu keeps its
+            // place at the reference. A submenu returned to by a pop restores its stored scroll position instead.
+            let topPushedItemId = self.actionsStackNode.topPushedItemId
+            let opensPushedItemAtTop = topPushedItemId != nil && topPushedItemId != self.appliedTopPushedItemId && actionsTopOverflow > 0.0 && self.actionsStackNode.storedScrollingState == nil
+            
+            if self.scroller.contentSize != contentSize || opensPushedItemAtTop {
                 let previousContentOffset = self.scroller.contentOffset
                 self.scroller.contentSize = contentSize
                 if let storedScrollingState = self.actionsStackNode.storedScrollingState {
                     self.actionsStackNode.clearStoredScrollingState()
                     
                     self.scroller.contentOffset = CGPoint(x: 0.0, y: storedScrollingState)
+                } else if opensPushedItemAtTop {
+                    self.scroller.contentOffset = CGPoint(x: 0.0, y: 0.0)
+                } else if actionsTopOverflow != self.appliedActionsTopOverflow {
+                    // The overflow is what the menu is scrolled by to sit at its reference: when a relayout (rotation,
+                    // a fold) changes it, move the offset with it, or the menu drifts off its reference and, once it
+                    // fits, keeps an offset that leaves its top out of reach.
+                    let maxContentOffsetY = max(0.0, contentSize.height - layout.size.height)
+                    let contentOffsetY = max(0.0, min(maxContentOffsetY, contentOffsetBeforeLayout.y + actionsTopOverflow - self.appliedActionsTopOverflow))
+                    self.scroller.contentOffset = CGPoint(x: 0.0, y: contentOffsetY)
                 }
                 if case .none = stateTransition, transition.isAnimated {
                     let contentOffset = self.scroller.contentOffset
                     transition.animateOffsetAdditive(layer: self.scrollNode.layer, offset: previousContentOffset.y - contentOffset.y)
                 }
             }
+            
+            self.appliedActionsTopOverflow = actionsTopOverflow
+            self.appliedTopPushedItemId = topPushedItemId
             
             self.actionsStackNode.updatePanSelection(isEnabled: contentSize.height <= layout.size.height)
             
@@ -1644,7 +1734,11 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
                 }
             } else if let contentNode = controllerContentNode {
                 if case let .controller(source) = self.source, let transitionInfo = source.transitionInfo(), let (sourceView, sourceRect) = transitionInfo.sourceNode() {
-                    let sourcePoint = sourceView.convert(sourceRect.center, to: self.view)
+                    // Not `sourceView.convert(_:to: self.view)`: while the keyboard is up the menu is in the keyboard
+                    // window, and the direct conversion from the app window answers (inf, inf). The preview then springs
+                    // in from infinity and only appears when the spring ends (a long press on a chat-list search result
+                    // with the keyboard up). See docs/ios27-windows-and-touches.md.
+                    let sourcePoint = sourceView.convertAcrossWindows(sourceRect, to: self.view).center
                     animationInContentYDistance = contentRect.midY - sourcePoint.y
                 } else {
                     animationInContentYDistance = 0.0
@@ -2080,7 +2174,7 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
             }
             if let contentNode = controllerContentNode {
                 if case let .controller(source) = self.source, let transitionInfo = source.transitionInfo(), let (sourceView, sourceRect) = transitionInfo.sourceNode() {
-                    let sourcePoint = sourceView.convert(sourceRect.center, to: self.view)
+                    let sourcePoint = sourceView.convertAcrossWindows(sourceRect, to: self.view).center
                     animationInContentYDistance = contentRect.midY - sourcePoint.y
                 } else {
                     animationInContentYDistance = 0.0
@@ -2113,7 +2207,10 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
             }
             
             if self.hasActiveLiquidMorph {
-                self.actionsStackNode.animateOut(alongsideAnimations: { [weak self] in
+                // The source resolved in this pass, as the opening resolved it: an action applied before the menu
+                // closes can have resized it.
+                let currentSource = liquidMorphSource.map { (view: $0.container, sourceRect: $0.sourceRect, sourcePath: $0.sourcePath) }
+                self.actionsStackNode.animateOut(currentSource: currentSource, alongsideAnimations: { [weak self] in
                     self?.additionalActionsStackNode.alpha = 0.0
                 }, completion: { [weak self] in
                     self?.hasActiveLiquidMorph = false

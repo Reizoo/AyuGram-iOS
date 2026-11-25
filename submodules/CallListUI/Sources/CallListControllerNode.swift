@@ -1,5 +1,4 @@
 import Foundation
-import LottieSettings
 import UIKit
 import AsyncDisplayKit
 import Display
@@ -280,7 +279,7 @@ final class CallListControllerNode: ASDisplayNode {
         self.emptyTextNode.textAlignment = .center
         self.emptyTextNode.maximumNumberOfLines = 3
         
-        self.emptyAnimationNode = DefaultAnimatedStickerNodeImpl(lottieSettings: self.context.lottieRenderingSettings)
+        self.emptyAnimationNode = DefaultAnimatedStickerNodeImpl()
         self.emptyAnimationNode.alpha = 0.0
         self.emptyAnimationNode.isUserInteractionEnabled = false
         
@@ -673,23 +672,6 @@ final class CallListControllerNode: ASDisplayNode {
             
             self.listNode.visibleContentOffsetChanged = { [weak self] offset, _ in
                 if let strongSelf = self {
-                    var previousContentOffsetValue: CGFloat?
-                    if let previousContentOffset = strongSelf.previousContentOffset, case let .known(value) = previousContentOffset {
-                        previousContentOffsetValue = value
-                    }
-                    switch offset {
-                        case let .known(value):
-                            let transition: ContainedViewLayoutTransition
-                            if let previousContentOffsetValue = previousContentOffsetValue, value <= 0.0, previousContentOffsetValue > 30.0 {
-                                transition = .animated(duration: 0.2, curve: .easeInOut)
-                            } else {
-                                transition = .immediate
-                            }
-                            strongSelf.navigationBar?.updateBackgroundAlpha(min(30.0, value) / 30.0, transition: transition)
-                        case .unknown, .none:
-                            strongSelf.navigationBar?.updateBackgroundAlpha(1.0, transition: .immediate)
-                    }
-                    
                     strongSelf.previousContentOffset = offset
                 }
             }

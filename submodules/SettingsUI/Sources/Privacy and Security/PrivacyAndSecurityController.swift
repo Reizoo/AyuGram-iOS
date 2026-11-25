@@ -2,7 +2,6 @@ import Foundation
 import UIKit
 import Display
 import SwiftSignalKit
-import Postbox
 import TelegramCore
 import TelegramPresentationData
 import TelegramUIPreferences
@@ -587,7 +586,7 @@ private final class PrivacyAndSecurityContextReferenceContentSource: ContextRefe
     }
 }
 
-private func countForSelectivePeers(_ peers: [PeerId: SelectivePrivacyPeer]) -> Int {
+private func countForSelectivePeers(_ peers: [EnginePeer.Id: SelectivePrivacyPeer]) -> Int {
     var result = 0
     for (_, peer) in peers {
         result += peer.userCount
@@ -1415,7 +1414,7 @@ public func privacyAndSecurityController(
                     }, action: { _, f in
                         f(.default)
                         timeoutAction(value)
-                    }))
+                    }, accessibilityIsSelected: privacySettingsValue.accountRemovalTimeout == value))
                 }
                 timeoutItems.append(.separator)
                 timeoutItems.append(.action(ContextMenuActionItem(text: presentationData.strings.PrivacySettings_DeleteAccountNow, textColor: .destructive, icon: { _ in

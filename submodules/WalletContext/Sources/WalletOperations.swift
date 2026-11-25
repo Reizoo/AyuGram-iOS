@@ -2,7 +2,6 @@ import PasscodeCore
 import Foundation
 import SwiftSignalKit
 import TelegramCore
-import Postbox
 import WalletEngineFFI
 
 @available(macOS 10.15, *)
@@ -26,8 +25,6 @@ final class WalletImportRequestState {
         do {
             return try await request()
         } catch let error as TelegramCore.WalletOperationError {
-            // Password preflight and explicit RPC rejections did not accept
-            // this replacement. A transport failure leaves the outcome unknown.
             self.preserveCandidate = previouslyPending || error == .network
             throw error
         }
@@ -322,6 +319,12 @@ public extension WalletContext {
         }
     }
 
+    func walletBalance(address: String) -> Signal<Int64, WalletError> {
+        self.signal(name: "loading_address_balance") { impl, _ in
+            try await impl.walletBalance(address: address)
+        }
+    }
+
     func previousWallets(refreshBalances: Bool = false) -> Signal<[PreviousWallet], WalletError> {
         let cached = self.state
         |> filter { state in
@@ -505,6 +508,28 @@ public extension WalletContext {
                 address: address,
                 collectible: collectible,
                 comment: comment,
+                operationId: operationId
+            )
+        }
+    }
+
+    func prepareCollectibleDeposit(
+        collectible: Collectible,
+        address: String,
+        payload: Data,
+        amount: Int64
+    ) -> Signal<PreparedTransfer, WalletError> {
+        self.signal(
+            name: "preparing_transfer",
+            discardResult: { [impl = self.impl] prepared in
+                Task { await impl.discardPreparedTransfer(prepared) }
+            }
+        ) { impl, operationId in
+            try await impl.prepareCollectibleDeposit(
+                collectible: collectible,
+                address: address,
+                payload: payload,
+                amount: amount,
                 operationId: operationId
             )
         }
@@ -774,6 +799,10 @@ extension WalletContextImpl {
                 throw error
             }
         }
+    }
+
+    func walletBalance(address: String) async throws -> Int64 {
+        try await self.runtime.walletBalance(address: address)
     }
 
     func previousWallets() async throws -> [WalletContext.PreviousWallet] {
@@ -1644,11 +1673,8 @@ extension WalletContextImpl {
                resolved.amount <= balance,
                feesAreCovered || (resolved.amount < balance && estimatedFee < balance - resolved.amount) {
                 fee = estimatedFee
-                // Bound the local request; signing still obtains fresh chain state and its own validUntil.
                 expiresAt = Int32(clamping: Int64(currentWalletTimestamp()) + 300)
             } else {
-                // External-message emulation requires funds for fees. Estimate with zero value
-                // when gasless covers them; the signed intent keeps the exact requested amount.
                 let previewIntent = feesAreCovered ? SendIntent(
                     expiration: resolved.expiration,
                     messages: [resolved.destination.message(amount: .exact(nanograms: "0"), body: body)]
@@ -1802,6 +1828,55 @@ extension WalletContextImpl {
         }
     }
 
+    func prepareCollectibleDeposit(
+        collectible: Collectible,
+        address: String,
+        payload: Data,
+        amount: Int64,
+        operationId: UUID
+    ) async throws -> PreparedTransfer {
+        return try await self.performOperation(.preparingTransfer, operationId: operationId) {
+            guard case let .wallet(info) = self.currentState.phase, info.canSign else {
+                throw WalletError.unavailable
+            }
+            guard amount >= 0 else {
+                throw WalletError.invalidAmount
+            }
+            let destination = try WalletTransferDestination(address)
+            let body: SendMessageBody = .rawPayload(boc: payload.base64EncodedString())
+            let intent = SendIntent(
+                expiration: .engineDefault,
+                messages: [destination.message(amount: .exact(nanograms: String(amount)), body: body)]
+            )
+            let preview = try await self.runtime.previewSend(intent: intent)
+            try Task.checkCancellation()
+            guard !preview.emulation.isIncomplete else { throw WalletError.previewIncomplete }
+            guard let fee = Int64(preview.emulation.walletFeesNanograms) else { throw WalletError.previewFailed }
+            if let balance = self.currentState.balance.currentValue, amount > balance || fee > balance - amount {
+                let (required, overflow) = amount.addingReportingOverflow(fee)
+                throw WalletError.insufficientBalance(required: overflow ? Int64.max : required)
+            }
+            let transfer = PreparedTransfer(
+                id: UUID().uuidString.lowercased(),
+                recipient: walletNftTransferNewOwner(payload) ?? destination.address,
+                amount: 0,
+                comment: nil,
+                collectible: collectible,
+                fee: fee,
+                expiresAt: Int32(clamping: preview.validUntil)
+            )
+            self.preparedTransfers[transfer.id] = PreparedEngineTransferRecord(
+                walletAddress: info.address,
+                transfer: transfer,
+                request: .send(intent),
+                allowsGasless: false,
+                isGiftDeposit: true
+            )
+            self.removeExpiredPreparedTransfers()
+            return transfer
+        }
+    }
+
     func submitTransfer(
         _ prepared: PreparedTransfer,
         recipientPeerId: EnginePeer.Id? = nil,
@@ -1932,7 +2007,7 @@ extension WalletContextImpl {
                 throw WalletError.unavailable
             }
             let expectedGasless: Bool
-            if WalletContext.useWalletTransferApi, case .send = record.request,
+            if WalletContext.useWalletTransferApi, case .send = record.request, record.allowsGasless,
                !WalletContext.isSelfTransfer(recipient: prepared.recipient, walletAddress: info.address) {
                 expectedGasless = WalletContext.isGaslessEligible(
                     amount: prepared.amount,
@@ -1956,6 +2031,12 @@ extension WalletContextImpl {
                 createdAt: createdAt,
                 status: .broadcasting
             )
+            if let collectible = prepared.collectible {
+                self.pendingTransferCollectibles[pending.id] = collectible
+            }
+            if record.isGiftDeposit {
+                self.pendingGiftDepositIds.insert(pending.id)
+            }
             if WalletContext.useWalletTransferApi, case let .send(intent) = record.request {
                 let submission = try await self.beginWalletApiSubmission(
                     prepared: prepared,
@@ -1968,8 +2049,12 @@ extension WalletContextImpl {
                     control: control,
                     minimumSeqno: minimumSeqno,
                     pendingRegistration: registration?.registration,
-                    registrationSession: registration?.session
+                    registrationSession: registration?.session,
+                    allowsGasless: record.allowsGasless
                 )
+                if let recipientPeerId, prepared.collectible == nil {
+                    self.transferRecipientPeerIds[prepared.id] = recipientPeerId
+                }
                 if pendingMessage != nil { await pendingMessageCreated?() }
                 return .api(submission)
             }
@@ -2180,8 +2265,12 @@ extension WalletContextImpl {
                     }
                     return result.shouldContinue
                 })
+                if self.currentState.transactions.isLoadingMore {
+                    self.updateTransactionsPagination(isLoadingMore: false, error: self.currentState.transactions.error)
+                }
             } catch {
                 guard self.isCurrentPaginationOperation(operationId, generation: generation) else {
+                    self.finishAbandonedTransactionsPagination(operationId)
                     throw CancellationError()
                 }
                 let isCancelled = Task.isCancelled || error is CancellationError
@@ -2226,6 +2315,7 @@ extension WalletContextImpl {
                 guard self.runtimeObservationId == observationId,
                       self.currentState.collectibles.acceptsPage(pageId) else { throw CancellationError() }
                 self.replaceCollectibles(try self.currentState.collectibles.applying(page, offset: pageId.offset, refresh: false))
+                self.reconcileCardStickers(self.currentState.collectibles)
             } catch {
                 guard self.isCurrentPaginationOperation(operationId, generation: generation),
                       self.runtimeObservationId == observationId,
@@ -2251,6 +2341,13 @@ extension WalletContextImpl {
         guard self.isCurrentPaginationOperation(operationId, generation: generation) else {
             throw CancellationError()
         }
+    }
+
+    private func finishAbandonedTransactionsPagination(_ operationId: UUID) {
+        guard !self.isShutdown, self.currentState.transactions.isLoadingMore,
+              self.activeOperationId == operationId
+                || self.currentState.activeOperation != .loadingMoreTransactions else { return }
+        self.updateTransactionsPagination(isLoadingMore: false, error: self.currentState.transactions.error)
     }
 
     private func updateTransactionsPagination(isLoadingMore: Bool, error: SynchronizationError?) {

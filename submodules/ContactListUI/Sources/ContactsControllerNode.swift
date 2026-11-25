@@ -13,6 +13,7 @@ import SearchUI
 import AppBundle
 import ContextUI
 import ChatListHeaderComponent
+import NavigationBarComponent
 import ChatListTitleView
 import ComponentFlow
 import SwiftUI
@@ -301,14 +302,14 @@ final class ContactsControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
         let tabsNodeIsSearch = false
         
         let title: String
-        let leftButton: AnyComponentWithIdentity<NavigationButtonComponentEnvironment>?
-        let rightButtons: [AnyComponentWithIdentity<NavigationButtonComponentEnvironment>]
+        let leftButton: NavigationBarComponent.Button?
+        let rightButtons: [NavigationBarComponent.Button]
         
         if let selectionState = self.contactListNode.selectionState {
             title = self.presentationData.strings.Contacts_SelectedContacts(Int32(selectionState.selectedPeerIndices.count))
-            leftButton = AnyComponentWithIdentity(id: "done", component: AnyComponent(NavigationButtonComponent(
+            leftButton = NavigationBarComponent.Button(id: "done",
                 content: .text(title: self.presentationData.strings.Common_Done, isBold: true),
-                pressed: { [weak self] sourceView in
+                action: { [weak self] sourceView in
                     guard let self else {
                         return
                     }
@@ -316,39 +317,46 @@ final class ContactsControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
                         return nil
                     }
                 }
-            )))
+            )
             rightButtons = []
         } else {
             title = self.presentationData.strings.Contacts_Title
-            leftButton = AnyComponentWithIdentity(id: "sort", component: AnyComponent(NavigationButtonComponent(
+            let sortButton = NavigationBarComponent.Button(id: "sort",
                 content: .text(title: self.presentationData.strings.Contacts_Sort, isBold: false),
-                pressed: { [weak self] sourceView in
+                action: { [weak self] sourceView in
                     guard let self else {
                         return
                     }
                     
                     self.controller?.presentSortMenu(sourceView: sourceView, gesture: nil)
                 }
-            )))
-            rightButtons = [AnyComponentWithIdentity(id: "add", component: AnyComponent(NavigationButtonComponent(
+            )
+            let addButton = NavigationBarComponent.Button(id: "add",
                 content: .icon(imageName: "Chat List/AddIcon"),
-                pressed: { [weak self] _ in
+                overflow: NavigationBarComponent.OverflowInfo(title: self.presentationData.strings.Contacts_VoiceOver_AddContact, iconName: nil, priority: nil),
+                action: { [weak self] _ in
                     guard let self else {
                         return
                     }
                     self.controller?.addPressed()
                 }
-            )))]
+            )
+            // The left is the back button's: Sort stands on the right, its own capsule beside Add.
+            leftButton = nil
+            rightButtons = [sortButton, addButton]
         }
         
+        // Pushed (from Settings) the header has a back button.
+        let backPressed: (() -> Void)? = { [weak self] in
+            self?.controller?.navigationController?.popViewController(animated: true)
+        }
         let primaryContent = ChatListHeaderComponent.Content(
             title: self.presentationData.strings.Contacts_Title,
-            navigationBackTitle: nil,
             titleComponent: nil,
             chatListTitle: NetworkStatusTitle(text: title, activity: false, hasProxy: false, connectsViaProxy: false, isPasscodeSet: false, isManuallyLocked: false, peerStatus: nil),
             leftButton: leftButton,
             rightButtons: rightButtons,
-            backPressed: nil
+            backPressed: backPressed
         )
         
         let navigationBarSize = self.navigationBarView.update(
@@ -518,13 +526,21 @@ final class ContactsControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
                 }
             }
         }, placeholder: placeholderNode)
+        // The search results cover the list: VoiceOver must not read the list behind them.
+        self.contactListNode.accessibilityElementsHidden = true
     }
     
-    func deactivateSearch(placeholderNode: SearchBarPlaceholderNode?, animated: Bool) {
+    /// Ends the search; the returned closure animates the search bar out into `placeholderNode` and is called once the
+    /// navigation bar has been laid out without the active search.
+    func deactivateSearch(placeholderNode: SearchBarPlaceholderNode?, animated: Bool) -> (() -> Void)? {
         self.isSearchDisplayControllerActive = nil
-        if let searchDisplayController = self.searchDisplayController {
+        self.contactListNode.accessibilityElementsHidden = false
+        guard let searchDisplayController = self.searchDisplayController else {
+            return nil
+        }
+        self.searchDisplayController = nil
+        return { [weak placeholderNode] in
             searchDisplayController.deactivate(placeholder: placeholderNode, animated: animated)
-            self.searchDisplayController = nil
         }
     }
 }

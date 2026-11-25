@@ -443,10 +443,6 @@ final class DataUsageScreenComponent: Component {
                 
                 headerOffset = min(headerOffset, minOffset)
                 
-                let animatedTransition = ComponentTransition(animation: .curve(duration: 0.2, curve: .easeInOut))
-                
-                let navigationButtonAlpha: CGFloat = scrollBounds.minY >= navigationMetrics.navigationHeight ? 0.0 : 1.0
-                
                 transition.setBounds(view: self.headerOffsetContainer, bounds: CGRect(origin: CGPoint(x: 0.0, y: headerOffset), size: self.headerOffsetContainer.bounds.size))
                 
                 let headerContentsAlpha: CGFloat
@@ -454,10 +450,6 @@ final class DataUsageScreenComponent: Component {
                 headerContentsAlpha = min(1.0, max(0.0, offsetFraction))
                 
                 transition.setAlpha(view: self.headerContentContainer, alpha: headerContentsAlpha)
-                
-                if let controller = self.controller?(), let backButtonNode = controller.navigationBar?.backButtonNode {
-                    backButtonNode.updateManualAlpha(alpha: navigationButtonAlpha, transition: animatedTransition.containedViewLayoutTransition)
-                }
             }
         }
         
@@ -785,6 +777,7 @@ final class DataUsageScreenComponent: Component {
             let headerViewFrame = CGRect(origin: CGPoint(x: floor(bandCenterX - headerViewSize.width / 2.0), y: contentHeight), size: headerViewSize)
             if let headerComponentView = self.headerView.view {
                 if headerComponentView.superview == nil {
+                    headerComponentView.accessibilityTraits = .header
                     self.headerOffsetContainer.addSubview(headerComponentView)
                 }
                 transition.setPosition(view: headerComponentView, position: headerViewFrame.center)
@@ -1006,6 +999,7 @@ final class DataUsageScreenComponent: Component {
             if let totalCategoriesTitleComponentView = self.totalCategoriesTitleView.view {
                 if totalCategoriesTitleComponentView.superview == nil {
                     totalCategoriesTitleComponentView.layer.anchorPoint = CGPoint()
+                    totalCategoriesTitleComponentView.accessibilityTraits = .header
                     self.scrollContainerView.addSubview(totalCategoriesTitleComponentView)
                 }
                 

@@ -17,12 +17,11 @@ jobs:
 
       - name: Submodules (relative URLs point at the fork, use upstream TelegramMessenger)
         run: |
-          git config -f .gitmodules submodule.submodules/rlottie/rlottie.url https://github.com/TelegramMessenger/rlottie.git
           git config -f .gitmodules submodule.submodules/TgVoipWebrtc/tgcalls.url https://github.com/TelegramMessenger/tgcalls.git
           git submodule sync --recursive
           git submodule update --init --recursive --jobs 8
 
-      - name: Select Xcode 27.1 (the code uses iOS 27.1 APIs; versions.json still says 26.6)
+      - name: Select Xcode 27.1 (versions.json)
         run: |
           sudo xcode-select -s /Applications/Xcode_27.1.app/Contents/Developer
           xcodebuild -version
