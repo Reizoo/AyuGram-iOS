@@ -19,7 +19,19 @@ jobs:
         run: |
           git config -f .gitmodules submodule.submodules/TgVoipWebrtc/tgcalls.url https://github.com/TelegramMessenger/tgcalls.git
           git submodule sync --recursive
-          git submodule update --init --recursive --jobs 8
+          # Shallow clones (webrtc's full history is huge) with retries. Errors go to annotations,
+          # which are readable without signing in, unlike the job log.
+          echo "::notice::disk before submodules: $(df -h . | tail -1)"
+          ok=0
+          for attempt in 1 2 3; do
+            if git submodule update --init --recursive --jobs 4 --depth 1 > submodules.log 2>&1; then ok=1; break; fi
+            echo "::warning::submodules attempt $attempt failed: $(grep -iE 'fatal|error|denied|not our ref|space' submodules.log | tail -4 | tr '\n' ' ')"
+            sleep 30
+          done
+          if [ "$ok" != 1 ]; then
+            echo "::error::submodules failed: $(grep -iE 'fatal|error|denied|not our ref|space' submodules.log | tail -6 | tr '\n' ' ') | disk: $(df -h . | tail -1)"
+            exit 1
+          fi
 
       - name: Select Xcode 27.1 (versions.json)
         run: |
