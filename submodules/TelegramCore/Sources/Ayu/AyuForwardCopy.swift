@@ -107,7 +107,7 @@ func ayuConvertProtectedForwards(account: Account, messages: [EnqueueMessage]) -
 
 /// Downloads the photo or file of `message` and returns a copy that points at a local resource,
 /// so that sending it uploads the bytes again. Nil when it cannot be downloaded in time.
-private func ayuLocalMediaCopy(account: Account, message: Message, media: Media) -> Signal<Media?, NoError> {
+func ayuLocalMediaCopy(account: Account, message: Message, media: Media) -> Signal<Media?, NoError> {
     let resource: MediaResource
     let userContentType: MediaResourceUserContentType
     if let image = media as? TelegramMediaImage, let representation = largestImageRepresentation(image.representations) {

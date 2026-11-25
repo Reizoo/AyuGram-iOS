@@ -1603,6 +1603,17 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
             })))
         }
 
+        // AyuGram: send N exact copies of the message (text, entities, media, the same reply).
+        if message.id.namespace == Namespaces.Message.Cloud, !message.text.isEmpty || message.media.contains(where: { $0 is TelegramMediaImage || $0 is TelegramMediaFile || $0 is TelegramMediaMap || $0 is TelegramMediaContact || $0 is TelegramMediaDice }) {
+            let floodCount = AyuSettings.floodCount
+            actions.append(.action(ContextMenuActionItem(text: "Флуд ×\(floodCount)", icon: { theme in
+                return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Copy"), color: theme.actionSheet.primaryTextColor)
+            }, action: { _, f in
+                let _ = ayuFloodMessage(account: context.account, message: message, count: floodCount, intervalMs: AyuSettings.floodIntervalMs).start()
+                f(.default)
+            })))
+        }
+
         if (loggingSettings.logToFile || loggingSettings.logToConsole) && !downloadableMediaResourceInfos.isEmpty {
             actions.append(.action(ContextMenuActionItem(text: "Send Logs", icon: { theme in
                 return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Message"), color: theme.actionSheet.primaryTextColor)

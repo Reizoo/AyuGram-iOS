@@ -139,6 +139,7 @@ private enum AyuSettingsSection: Int32 {
     case ghost
     case history
     case other
+    case flood
 }
 
 private enum AyuSettingsEntry: ItemListNodeEntry {
@@ -149,6 +150,10 @@ private enum AyuSettingsEntry: ItemListNodeEntry {
     case historyFooter
     case otherHeader
     case scripts
+    case floodHeader
+    case floodCount(String)
+    case floodInterval(String)
+    case floodFooter
 
     var section: ItemListSectionId {
         switch self {
@@ -160,6 +165,8 @@ private enum AyuSettingsEntry: ItemListNodeEntry {
             return AyuSettingsSection.other.rawValue
         case .scripts:
             return AyuSettingsSection.scripts.rawValue
+        case .floodHeader, .floodCount, .floodInterval, .floodFooter:
+            return AyuSettingsSection.flood.rawValue
         case let .toggle(toggle, _):
             switch toggle {
             case .sendOnline, .sendTyping, .sendReadMessages, .sendReadStories, .readAfterSend, .sendAsScheduled:
@@ -217,6 +224,14 @@ private enum AyuSettingsEntry: ItemListNodeEntry {
             return 20
         case .scripts:
             return -1
+        case .floodHeader:
+            return 30
+        case .floodCount:
+            return 31
+        case .floodInterval:
+            return 32
+        case .floodFooter:
+            return 33
         }
     }
 
@@ -241,6 +256,22 @@ private enum AyuSettingsEntry: ItemListNodeEntry {
             return ItemListSectionHeaderItem(presentationData: presentationData, text: "ПРОЧЕЕ", sectionId: self.section)
         case .historyFooter:
             return ItemListTextItem(presentationData: presentationData, text: .plain("Удалённые сообщения остаются в чате с пометкой 🗑. Старые версии правок — в меню сообщения → «История правок». Обход запрета: в защищённых чатах можно копировать, сохранять, пересылать (уходит копией без автора) и скринить; одноразовые сохраняются через меню сообщения; о скриншотах собеседнику не сообщается."), sectionId: self.section)
+        case .floodHeader:
+            return ItemListSectionHeaderItem(presentationData: presentationData, text: "ФЛУД", sectionId: self.section)
+        case let .floodCount(text):
+            return ItemListSingleLineInputItem(presentationData: presentationData, systemStyle: .glass, title: NSAttributedString(string: "Сообщений", textColor: presentationData.theme.list.itemPrimaryTextColor), text: text, placeholder: "10", type: .number, spacing: 10.0, sectionId: self.section, textUpdated: { value in
+                if let number = Int(value) {
+                    AyuSettings.floodCount = number
+                }
+            }, action: {})
+        case let .floodInterval(text):
+            return ItemListSingleLineInputItem(presentationData: presentationData, systemStyle: .glass, title: NSAttributedString(string: "Пауза, мс", textColor: presentationData.theme.list.itemPrimaryTextColor), text: text, placeholder: "300", type: .number, spacing: 10.0, sectionId: self.section, textUpdated: { value in
+                if let number = Int(value) {
+                    AyuSettings.floodIntervalMs = number
+                }
+            }, action: {})
+        case .floodFooter:
+            return ItemListTextItem(presentationData: presentationData, text: .plain("Зажми сообщение → «Флуд»: уходит столько точных копий (текст, форматирование, медиа, ответ на то же сообщение). Максимум 100. Слишком частая отправка может дать временный запрет на отправку (FLOOD_WAIT) или спам-блок аккаунта."), sectionId: self.section)
         case let .toggle(toggle, value):
             return ItemListSwitchItem(presentationData: presentationData, systemStyle: .glass, title: toggle.title, value: value, sectionId: self.section, style: .blocks, updated: { value in
                 arguments.update(toggle, value)
@@ -266,6 +297,10 @@ private func ayuSettingsEntries() -> [AyuSettingsEntry] {
     for toggle in [AyuSettingsToggle.hideAds, .showSeconds, .showPeerId, .hideStories] {
         entries.append(.toggle(toggle, toggle.value))
     }
+    entries.append(.floodHeader)
+    entries.append(.floodCount("\(AyuSettings.floodCount)"))
+    entries.append(.floodInterval("\(AyuSettings.floodIntervalMs)"))
+    entries.append(.floodFooter)
     return entries
 }
 

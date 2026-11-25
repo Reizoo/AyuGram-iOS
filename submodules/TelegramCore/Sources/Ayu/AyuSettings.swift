@@ -17,6 +17,26 @@ public enum AyuSettings {
         return defaults.bool(forKey: key)
     }
 
+    /// How many copies the message menu's "Flood" sends.
+    public static var floodCount: Int {
+        get {
+            let value = defaults.integer(forKey: "ayu.floodCount")
+            return value > 0 ? min(value, 100) : 10
+        }
+        set { defaults.set(max(1, min(newValue, 100)), forKey: "ayu.floodCount") }
+    }
+
+    /// Pause between flood copies, in milliseconds (Telegram limits how fast one account may send).
+    public static var floodIntervalMs: Int {
+        get {
+            if defaults.object(forKey: "ayu.floodIntervalMs") == nil {
+                return 300
+            }
+            return max(0, min(defaults.integer(forKey: "ayu.floodIntervalMs"), 10000))
+        }
+        set { defaults.set(max(0, min(newValue, 10000)), forKey: "ayu.floodIntervalMs") }
+    }
+
     /// Send "online" status updates. When false the client reports itself offline.
     public static var sendOnlinePackets: Bool {
         get { return bool("ayu.sendOnlinePackets", default: true) }
