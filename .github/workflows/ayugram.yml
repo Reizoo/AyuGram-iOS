@@ -130,6 +130,26 @@ jobs:
                   diags.append("----")
           if diags:
               ann("compiler errors", diags[:240])
+          # What a failed action printed after bazel's ERROR line, without the echoed command.
+          after = []
+          for i, l in enumerate(lines):
+              if l.startswith("ERROR:") and "failed" in l:
+                  for k in lines[i + 1:i + 400]:
+                      if k.startswith((" ", "	")) and ("=" in k or k.strip().startswith(("-", "exec ", "(cd", "bazel-out", "external/"))):
+                          continue
+                      if k.startswith(("[", "INFO:", "ERROR: Build", "Target ")):
+                          continue
+                      after.append(k[:400])
+                  break
+          ann("after ERROR", after[:120] or ["(nothing)"])
+          # Source snippets Swift prints (" 404 | code") with the lines above them.
+          snips = []
+          for i, l in enumerate(lines):
+              if re.match(r"^\s*\d+ \|", l) and len(snips) < 200:
+                  snips.extend(x[:400] for x in lines[max(0, i - 3):i + 2])
+                  snips.append("----")
+          if snips:
+              ann("snippets", snips)
           ann("error lines", errs or ["(none matched)"])
           ann("last 60 lines", lines[-60:])
           PY
