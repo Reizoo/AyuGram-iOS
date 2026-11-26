@@ -115,11 +115,21 @@ jobs:
           for k in ("TG_API_HASH", "TG_API_ID"):
               v = os.environ.get(k)
               if v: t = t.replace(v, "***")
-          lines = [l for l in t.splitlines() if l.strip()]
-          errs = [l for l in lines if re.search(r"(error:|ERROR:|Error:|FAILED|fatal)", l)][-25:]
           def ann(title, ls):
               m = chr(10).join(ls)[-20000:].replace("%", "%25").replace(chr(13), "%0D").replace(chr(10), "%0A")
               print("::error title=%s::%s" % (title, m))
+          # Swift colours its diagnostics, which splits "error" from ":" with escape codes.
+          t = re.sub(chr(27) + r"\[[0-9;]*[A-Za-z]", "", t)
+          lines = [l for l in t.splitlines() if l.strip()]
+          errs = [l for l in lines if re.search(r"(error:|ERROR:|Error:|FAILED|fatal)", l)][-25:]
+          # Each compiler error with the source lines Swift prints under it.
+          diags = []
+          for i, l in enumerate(lines):
+              if re.search(r"\.(swift|m|mm|h|c|cpp):\d+:\d+: error:", l) and l not in diags:
+                  diags.extend(lines[i:i + 6])
+                  diags.append("----")
+          if diags:
+              ann("compiler errors", diags[:240])
           ann("error lines", errs or ["(none matched)"])
           ann("last 60 lines", lines[-60:])
           PY
