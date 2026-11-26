@@ -1,6 +1,6 @@
 import Foundation
 import Postbox
-import TelegramApi
+internal import TelegramApi
 import SwiftSignalKit
 
 /// AyuGram client-side settings. Stored in UserDefaults so that any thread

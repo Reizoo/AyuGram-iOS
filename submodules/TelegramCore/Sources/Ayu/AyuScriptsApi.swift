@@ -3,7 +3,7 @@ import JavaScriptCore
 import ImageIO
 import Postbox
 import SwiftSignalKit
-import TelegramApi
+internal import TelegramApi
 
 // AyuGram user scripts: network, timers, history, edit/delete/react, media and forwarding.
 
