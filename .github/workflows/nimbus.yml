@@ -1,0 +1,66 @@
+name: Nimbus iOS build
+
+on:
+  push:
+    branches: [ soundcloud ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Newest Xcode
+        run: |
+          X=$(ls -d /Applications/Xcode*.app | grep -v -i beta | sort -V | tail -1)
+          sudo xcode-select -s "$X/Contents/Developer"
+          xcodebuild -version
+          echo "::notice::$(xcodebuild -version | tr '\n' ' ')"
+
+      - name: Generate project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Build
+        run: |
+          set +e
+          xcodebuild -project Nimbus.xcodeproj -scheme Nimbus -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build > build.log 2>&1
+          rc=$?
+          # One annotation with every compiler error: annotations are readable without signing in.
+          python3 - <<'PY'
+          import re
+          lines = open("build.log", errors="replace").read().splitlines()
+          seen, out = set(), []
+          for i, l in enumerate(lines):
+              if re.search(r": error: |^error: |\*\* BUILD FAILED", l) and l not in seen:
+                  seen.add(l)
+                  out.append(re.sub(r"^.*?/Sources/", "Sources/", l))
+                  for nxt in lines[i + 1:i + 3]:
+                      if nxt.strip() and not re.search(r": (error|warning|note): ", nxt):
+                          out.append("    " + nxt.strip())
+          if out:
+              msg = "\n".join(out[:150]).replace("%", "%25").replace("\r", "").replace("\n", "%0A")
+              print("::error title=compiler errors::" + msg)
+          PY
+          tail -20 build.log
+          exit $rc
+
+      - name: Package IPA
+        run: |
+          APP=build/Build/Products/Release-iphoneos/Nimbus.app
+          test -d "$APP"
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qry Nimbus.ipa Payload
+          ls -la Nimbus.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Nimbus-ipa-${{ github.run_number }}
+          path: Nimbus.ipa
