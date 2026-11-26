@@ -95,6 +95,9 @@ jobs:
           cd /Users/Shared/telegram-ios
           BUILD_NUMBER="$(( $(git rev-list --count HEAD) + $(cat build_number_offset) ))"
           echo "BUILD_NUMBER=$BUILD_NUMBER" >> $GITHUB_ENV
+          # TelegramCore's compiler output (mostly warnings) is ~1.7 MB, over bazel's 1 MB default,
+          # and bazel then prints none of it: the error is hidden. A UI flag, not an action key.
+          echo 'build --experimental_ui_max_stdouterr_bytes=-1' >> .bazelrc
           set +e
           # soft stop at 105 min so the log tail and the disk cache get saved before the runner cuts the job
           ( sleep 6300; echo "ERROR: soft time limit reached, stopping bazel"; pkill -INT -f bazel-9; sleep 60; pkill -f bazel-9; pkill -f Make.py ) &
