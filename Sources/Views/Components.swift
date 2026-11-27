@@ -165,45 +165,58 @@ struct TrackRow: View {
 
     private var isCurrent: Bool { player.current?.id == track.id }
 
+    /// SoundCloud's row: square artwork, artist above the title, plays and length below.
     var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 12) {
-                ZStack {
-                    Artwork(url: track.artwork("t120x120"), size: 50)
-                    if isCurrent {
-                        RoundedRectangle(cornerRadius: 6).fill(.black.opacity(0.45)).frame(width: 50, height: 50)
-                        Image(systemName: player.isPlaying ? "waveform" : "pause.fill").foregroundColor(.white)
-                    }
-                }
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(track.title ?? "—")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundColor(isCurrent ? .accentColor : .primary)
-                        .lineLimit(1)
-                    HStack(spacing: 5) {
-                        if downloads.ids.contains(track.id) {
-                            Image(systemName: "arrow.down.circle.fill").font(.caption2).foregroundColor(.accentColor)
+        HStack(spacing: 4) {
+            Button(action: onTap) {
+                HStack(spacing: 12) {
+                    ZStack {
+                        Artwork(url: track.artwork("t120x120"), size: 58, corner: 2)
+                        if isCurrent {
+                            Rectangle().fill(.black.opacity(0.45)).frame(width: 58, height: 58)
+                            Image(systemName: player.isPlaying ? "waveform" : "pause.fill").foregroundColor(.white)
                         }
-                        if track.isSnipped {
-                            Text("ПРЕВЬЮ").font(.system(size: 9, weight: .bold)).padding(.horizontal, 4).padding(.vertical, 1)
-                                .background(Capsule().stroke(Color.secondary, lineWidth: 1)).foregroundColor(.secondary)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(track.user?.name ?? "").font(.system(size: 13)).foregroundColor(.secondary).lineLimit(1)
+                        Text(track.title ?? "—")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(isCurrent ? .sc : .primary)
+                            .lineLimit(1)
+                        HStack(spacing: 8) {
+                            if track.isSnipped {
+                                Text("GO+").font(.system(size: 9, weight: .heavy)).padding(.horizontal, 4).padding(.vertical, 1)
+                                    .background(RoundedRectangle(cornerRadius: 2).fill(Color.sc)).foregroundColor(.white)
+                            }
+                            if downloads.ids.contains(track.id) {
+                                Image(systemName: "arrow.down.circle.fill").foregroundColor(.sc)
+                            }
+                            if let p = track.playbackCount, p > 0 {
+                                HStack(spacing: 3) { Image(systemName: "play.fill"); Text(formatCount(p)) }
+                            }
+                            if session.likedIds.contains(track.id) {
+                                Image(systemName: "heart.fill").foregroundColor(.sc)
+                            }
+                            Text(formatDuration(track.seconds)).monospacedDigit()
                         }
-                        Text(track.user?.name ?? "").font(.subheadline).foregroundColor(.secondary).lineLimit(1)
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                    if let p = downloads.progress[track.id] {
+                        ProgressView(value: p).progressViewStyle(.circular).tint(.sc).frame(width: 20)
                     }
                 }
-                Spacer(minLength: 4)
-                if let p = downloads.progress[track.id] {
-                    ProgressView(value: p).progressViewStyle(.circular).frame(width: 20)
-                } else {
-                    if session.likedIds.contains(track.id) {
-                        Image(systemName: "heart.fill").font(.caption).foregroundColor(.accentColor)
-                    }
-                    Text(formatDuration(track.seconds)).font(.caption).foregroundColor(.secondary).monospacedDigit()
-                }
+                .contentShape(Rectangle())
             }
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+
+            Menu { TrackMenu(track: track) } label: {
+                Image(systemName: "ellipsis").font(.system(size: 16)).foregroundColor(.secondary)
+                    .frame(width: 32, height: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
         .contextMenu { TrackMenu(track: track) }
         .swipeActions(edge: .leading) {
             Button { player.playNext(track) } label: { Label("Далее", systemImage: "text.insert") }.tint(.orange)
@@ -267,7 +280,7 @@ struct PlaylistRow: View {
     var body: some View {
         NavigationLink(value: Route.playlist(playlist)) {
             HStack(spacing: 12) {
-                Artwork(url: playlist.artwork("t120x120"), size: 50)
+                Artwork(url: playlist.artwork("t120x120"), size: 58, corner: 2)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(playlist.title ?? "—").font(.system(size: 15, weight: .medium)).lineLimit(1)
                     Text([playlist.user?.name, playlist.trackCount.map { "\($0) треков" }].compactMap { $0 }.joined(separator: " · "))
@@ -283,7 +296,7 @@ struct PlaylistCard: View {
     var body: some View {
         NavigationLink(value: Route.playlist(playlist)) {
             VStack(alignment: .leading, spacing: 6) {
-                Artwork(url: playlist.artwork("t300x300"), size: 150, corner: 10)
+                Artwork(url: playlist.artwork("t300x300"), size: 150, corner: 3)
                 Text(playlist.title ?? "—").font(.system(size: 13, weight: .semibold)).lineLimit(1)
                 Text(playlist.shortDescription ?? playlist.user?.name ?? "").font(.caption).foregroundColor(.secondary).lineLimit(1)
             }
@@ -308,22 +321,26 @@ struct TrackListSection<T>: View {
     }
 }
 
+/// SoundCloud's header buttons: shuffle on the left, a large orange play button on the right.
 struct PlayShuffleButtons: View {
     let tracks: [SCTrack]
     @EnvironmentObject private var player: Player
     var body: some View {
-        HStack(spacing: 12) {
-            Button { player.play(tracks) } label: {
-                Label("Слушать", systemImage: "play.fill").frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
+        HStack(spacing: 14) {
+            Spacer()
             Button { player.shufflePlay(tracks) } label: {
-                Label("Вперемешку", systemImage: "shuffle").frame(maxWidth: .infinity)
+                Image(systemName: "shuffle").font(.system(size: 18, weight: .semibold)).foregroundColor(.primary)
+                    .frame(width: 48, height: 48).background(Circle().fill(Color.white.opacity(0.12)))
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.plain)
+            Button { player.play(tracks) } label: {
+                Image(systemName: "play.fill").font(.system(size: 22)).foregroundColor(.white).offset(x: 2)
+                    .frame(width: 58, height: 58).background(Circle().fill(Color.sc))
+            }
+            .buttonStyle(.plain)
         }
-        .controlSize(.large)
         .disabled(tracks.isEmpty)
+        .opacity(tracks.isEmpty ? 0.4 : 1)
     }
 }
 

@@ -83,6 +83,8 @@ struct SCTrack: Codable, Identifiable, Hashable {
     let genre: String?
     let createdAt: String?
     let description: String?
+    /// `https://wave.sndcdn.com/<id>_m.json`: `{width, height, samples}`.
+    let waveformUrl: String?
 
     static func == (a: SCTrack, b: SCTrack) -> Bool { a.id == b.id && (a.title == nil) == (b.title == nil) }
     func hash(into h: inout Hasher) { h.combine(id) }

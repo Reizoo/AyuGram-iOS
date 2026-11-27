@@ -21,7 +21,8 @@ struct NimbusApp: App {
                 .environmentObject(downloads)
                 .environmentObject(history)
                 .environmentObject(searchHistory)
-                .tint(.orange)
+                .tint(.sc)
+                .preferredColorScheme(.dark)
                 .task { await session.refresh() }
         }
     }
@@ -36,10 +37,12 @@ struct RootView: View {
         TabView {
             tab { HomeView() }
                 .tabItem { Label("Главная", systemImage: "house.fill") }
+            tab { FeedTab() }
+                .tabItem { Label("Лента", systemImage: "bolt.horizontal.fill") }
             tab { SearchView() }
                 .tabItem { Label("Поиск", systemImage: "magnifyingglass") }
             tab { LibraryView() }
-                .tabItem { Label("Медиатека", systemImage: "square.stack.fill") }
+                .tabItem { Label("Медиатека", systemImage: "books.vertical.fill") }
         }
         .fullScreenCover(isPresented: $player.showFullPlayer) { NowPlayingView() }
         .alert("SoundCloud", isPresented: Binding(get: { session.message != nil }, set: { if !$0 { session.message = nil } })) {
@@ -60,5 +63,28 @@ struct RootView: View {
             content().tabRoot()
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { MiniPlayer() }
+    }
+}
+
+/// SoundCloud keeps the feed in its own tab; without an account it asks to sign in.
+struct FeedTab: View {
+    @EnvironmentObject private var session: Session
+    @State private var showLogin = false
+
+    var body: some View {
+        if session.loggedIn {
+            FeedView()
+        } else {
+            VStack(spacing: 16) {
+                EmptyStateView(icon: "bolt.horizontal", title: "Лента подписок",
+                               subtitle: "Войди, чтобы видеть новые треки и репосты тех, на кого подписан.")
+                Button { showLogin = true } label: {
+                    Text("Войти").font(.headline).frame(maxWidth: 220).padding(.vertical, 12)
+                        .background(Capsule().fill(Color.sc)).foregroundColor(.white)
+                }
+            }
+            .navigationTitle("Лента")
+            .sheet(isPresented: $showLogin) { LoginView() }
+        }
     }
 }

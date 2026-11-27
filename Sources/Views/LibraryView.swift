@@ -25,8 +25,12 @@ struct LibraryView: View {
                     Button {
                         showLogin = true
                     } label: {
-                        Label("Войти в SoundCloud", systemImage: "person.crop.circle.badge.plus")
+                        Text("Войти в SoundCloud").font(.headline).foregroundColor(.white)
+                            .frame(maxWidth: .infinity).padding(.vertical, 12)
+                            .background(Capsule().fill(Color.sc))
                     }
+                    .buttonStyle(.plain)
+                    .listRowSeparator(.hidden)
                     Text("Без входа работают поиск, чарты, плейлисты и загрузки. Вход нужен для лайков, ленты и своих плейлистов.")
                         .font(.footnote).foregroundColor(.secondary)
                 }
@@ -63,7 +67,7 @@ struct LibraryView: View {
                 }
             }
         }
-        .listStyle(.insetGrouped)
+        .listStyle(.plain)
         .navigationTitle("Медиатека")
         .sheet(isPresented: $showLogin) { LoginView() }
         .confirmationDialog("Выйти из аккаунта SoundCloud?", isPresented: $confirmLogout, titleVisibility: .visible) {

@@ -242,9 +242,12 @@ struct LoginWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let cfg = WKWebViewConfiguration()
         cfg.websiteDataStore = .default()
+        // Google, Apple and Facebook sign in through a popup window ("Please enable popup windows").
+        cfg.preferences.javaScriptCanOpenWindowsAutomatically = true
         let web = WKWebView(frame: .zero, configuration: cfg)
         web.customUserAgent = SCClient.userAgent
         web.navigationDelegate = context.coordinator
+        web.uiDelegate = context.coordinator
         cfg.websiteDataStore.httpCookieStore.add(context.coordinator)
         web.load(URLRequest(url: URL(string: "https://soundcloud.com/signin")!))
         return web
@@ -252,11 +255,33 @@ struct LoginWebView: UIViewRepresentable {
 
     func updateUIView(_ uiView: WKWebView, context: Context) {}
 
-    final class Coordinator: NSObject, WKNavigationDelegate, WKHTTPCookieStoreObserver {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPCookieStoreObserver {
         let onToken: (String) -> Void
         private var done = false
+        private var popups: [WKWebView] = []
 
         init(onToken: @escaping (String) -> Void) { self.onToken = onToken }
+
+        /// A popup opens over the page in its own web view. It must use the configuration WebKit
+        /// passes, so `window.opener` and the sign-in result reach the page.
+        func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
+                     for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+            let host = popups.last ?? webView
+            let popup = WKWebView(frame: host.bounds, configuration: configuration)
+            popup.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            popup.customUserAgent = SCClient.userAgent
+            popup.navigationDelegate = self
+            popup.uiDelegate = self
+            host.addSubview(popup)
+            popups.append(popup)
+            return popup
+        }
+
+        func webViewDidClose(_ webView: WKWebView) {
+            webView.removeFromSuperview()
+            popups.removeAll { $0 === webView }
+            check(webView.configuration.websiteDataStore.httpCookieStore)
+        }
 
         func cookiesDidChange(in cookieStore: WKHTTPCookieStore) { check(cookieStore) }
 

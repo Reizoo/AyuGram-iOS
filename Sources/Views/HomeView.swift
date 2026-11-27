@@ -30,23 +30,36 @@ struct HomeView: View {
     @StateObject private var model = HomeModel()
     @EnvironmentObject private var session: Session
     @EnvironmentObject private var player: Player
+    @EnvironmentObject private var history: History
 
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 26) {
-                if session.loggedIn {
-                    HStack(spacing: 10) {
-                        QuickTile(title: "Лента", icon: "dot.radiowaves.up.forward", route: .feed)
-                        QuickTile(title: "Лайки", icon: "heart.fill", route: .likes)
+                if !history.tracks.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        NavigationLink(value: Route.history) {
+                            HStack(spacing: 4) {
+                                SectionTitle(text: "Недавно прослушанные").fixedSize()
+                                Spacer()
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            LazyHStack(alignment: .top, spacing: 12) {
+                                ForEach(Array(history.tracks.prefix(20).enumerated()), id: \.offset) { i, t in
+                                    TrackCard(track: t, size: 130) { player.play(history.tracks, at: i) }
+                                }
+                            }
+                            .padding(.horizontal)
+                        }
                     }
-                    .padding(.horizontal)
                 }
 
                 if !model.trending.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
                         NavigationLink(value: Route.charts) {
                             HStack {
-                                Text("В тренде").font(.title3.bold())
+                                Text("В тренде").font(.system(size: 20, weight: .bold))
                                 Image(systemName: "chevron.right").font(.subheadline.bold()).foregroundColor(.secondary)
                                 Spacer()
                             }
@@ -68,7 +81,7 @@ struct HomeView: View {
 
                 ForEach(model.selections, id: \.key) { sel in
                     VStack(alignment: .leading, spacing: 10) {
-                        Text(sel.title ?? "").font(.title3.bold()).padding(.horizontal)
+                        SectionTitle(text: sel.title ?? "", subtitle: sel.description)
                         ScrollView(.horizontal, showsIndicators: false) {
                             LazyHStack(alignment: .top, spacing: 14) {
                                 ForEach(sel.items?.collection ?? []) { p in
@@ -126,10 +139,10 @@ struct CompactTrack: View {
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 10) {
-                Artwork(url: track.artwork("t120x120"), size: 52)
+                Artwork(url: track.artwork("t120x120"), size: 52, corner: 2)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(track.title ?? "—").font(.system(size: 14, weight: .medium))
-                        .foregroundColor(player.current?.id == track.id ? .accentColor : .primary).lineLimit(1)
+                        .foregroundColor(player.current?.id == track.id ? .sc : .primary).lineLimit(1)
                     Text(track.user?.name ?? "").font(.caption).foregroundColor(.secondary).lineLimit(1)
                 }
                 Spacer(minLength: 0)

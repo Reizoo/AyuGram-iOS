@@ -1,41 +1,45 @@
 import AVKit
 import SwiftUI
 
+/// SoundCloud's mini player: a flat bar above the tab bar with an orange progress line.
 struct MiniPlayer: View {
     @EnvironmentObject private var player: Player
+    @EnvironmentObject private var session: Session
 
     var body: some View {
         if let t = player.current {
             VStack(spacing: 0) {
                 MiniProgress(clock: player.clock)
                 HStack(spacing: 12) {
-                    Artwork(url: t.artwork("t120x120"), size: 42)
+                    Artwork(url: t.artwork("t120x120"), size: 44, corner: 2)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(t.title ?? "—").font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                        Text(t.title ?? "—").font(.system(size: 14, weight: .semibold)).foregroundColor(.white).lineLimit(1)
                         Text(player.error ?? t.user?.name ?? "")
-                            .font(.caption).foregroundColor(player.error == nil ? .secondary : .red).lineLimit(1)
+                            .font(.system(size: 13)).foregroundColor(player.error == nil ? .gray : .red).lineLimit(1)
                     }
                     Spacer(minLength: 0)
-                    if player.isBuffering && player.isPlaying {
-                        ProgressView().frame(width: 36, height: 36)
-                    } else {
-                        Button { player.togglePlay() } label: {
-                            Image(systemName: player.isPlaying ? "pause.fill" : "play.fill").font(.title3).frame(width: 36, height: 36)
+                    if session.loggedIn {
+                        let liked = session.likedIds.contains(t.id)
+                        Button { session.toggleLike(t) } label: {
+                            Image(systemName: liked ? "heart.fill" : "heart").font(.system(size: 20))
+                                .foregroundColor(liked ? .sc : .white).frame(width: 40, height: 44)
                         }
                     }
-                    Button { player.next() } label: {
-                        Image(systemName: "forward.fill").font(.title3).frame(width: 36, height: 36)
+                    if player.isBuffering && player.isPlaying {
+                        ProgressView().tint(.white).frame(width: 40, height: 44)
+                    } else {
+                        Button { player.togglePlay() } label: {
+                            Image(systemName: player.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 22))
+                                .foregroundColor(.white).frame(width: 40, height: 44)
+                        }
                     }
                 }
-                .foregroundColor(.primary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .padding(.leading, 10)
+                .padding(.trailing, 6)
+                .padding(.vertical, 6)
             }
-            .background(.regularMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .shadow(color: .black.opacity(0.15), radius: 8, y: 2)
-            .padding(.horizontal, 8)
-            .padding(.bottom, 4)
+            .background(Color.scSurface)
+            .overlay(alignment: .bottom) { Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5) }
             .contentShape(Rectangle())
             .onTapGesture { player.showFullPlayer = true }
             .gesture(DragGesture(minimumDistance: 20).onEnded { v in
@@ -51,13 +55,18 @@ private struct MiniProgress: View {
     @ObservedObject var clock: PlaybackClock
     var body: some View {
         GeometryReader { g in
-            Rectangle().fill(Color.accentColor)
-                .frame(width: clock.duration > 0 ? g.size.width * min(1, clock.time / clock.duration) : 0)
+            ZStack(alignment: .leading) {
+                Rectangle().fill(Color.white.opacity(0.12))
+                Rectangle().fill(Color.sc)
+                    .frame(width: clock.duration > 0 ? g.size.width * min(1, clock.time / clock.duration) : 0)
+            }
         }
         .frame(height: 2)
     }
 }
 
+/// SoundCloud's player: the artwork fills the screen, title and artist sit in black label boxes,
+/// and the waveform is the scrubber. Tapping the artwork pauses and resumes.
 struct NowPlayingView: View {
     @EnvironmentObject private var player: Player
     @EnvironmentObject private var session: Session
@@ -70,124 +79,66 @@ struct NowPlayingView: View {
     var body: some View {
         let t = player.current
         ZStack {
-            Artwork(url: t?.artwork(), size: 600, corner: 0)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .blur(radius: 60)
-                .opacity(0.55)
-                .ignoresSafeArea()
-            Color(.systemBackground).opacity(0.35).ignoresSafeArea()
+            Color.black.ignoresSafeArea()
 
-            VStack(spacing: 18) {
+            GeometryReader { g in
+                AsyncImage(url: t?.artwork("t500x500"), transaction: Transaction(animation: .easeOut(duration: 0.2))) { phase in
+                    if case .success(let img) = phase {
+                        img.resizable().scaledToFill()
+                    } else {
+                        LinearGradient(colors: [Color.sc.opacity(0.6), .black], startPoint: .top, endPoint: .bottom)
+                    }
+                }
+                .frame(width: g.size.width, height: g.size.height)
+                .clipped()
+            }
+            .ignoresSafeArea()
+            .contentShape(Rectangle())
+            .onTapGesture { player.togglePlay() }
+
+            VStack(spacing: 0) {
+                LinearGradient(colors: [.black.opacity(0.55), .clear], startPoint: .top, endPoint: .bottom).frame(height: 180)
+                Spacer()
+                LinearGradient(colors: [.clear, .black.opacity(0.9)], startPoint: .top, endPoint: .bottom).frame(height: 380)
+            }
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+
+            VStack(alignment: .leading, spacing: 0) {
+                header(t)
+                Spacer(minLength: 0)
                 HStack {
-                    Button { dismiss() } label: { Image(systemName: "chevron.down").font(.title3.bold()).frame(width: 44, height: 44) }
                     Spacer()
-                    if let at = player.sleepAt {
-                        Label(at.formatted(date: .omitted, time: .shortened), systemImage: "moon.zzz.fill").font(.caption).foregroundColor(.secondary)
+                    if !player.isPlaying && !player.isBuffering {
+                        Image(systemName: "play.fill").font(.system(size: 34)).foregroundColor(.white)
+                            .frame(width: 84, height: 84).background(Circle().fill(Color.black.opacity(0.55)))
+                            .transition(.opacity)
                     }
                     Spacer()
-                    if let t {
-                        Menu {
-                            TrackMenu(track: t)
-                            if let u = t.user { Button { artist = u } label: { Label("К артисту", systemImage: "person") } }
-                            Button { related = t } label: { Label("Похожие треки", systemImage: "sparkles") }
-                            Menu {
-                                ForEach([15, 30, 45, 60, 90], id: \.self) { m in Button("\(m) мин") { player.setSleep(minutes: m) } }
-                                if player.sleepAt != nil { Button("Выключить", role: .destructive) { player.setSleep(minutes: nil) } }
-                            } label: { Label("Таймер сна", systemImage: "moon.zzz") }
-                        } label: { Image(systemName: "ellipsis.circle").font(.title3).frame(width: 44, height: 44) }
-                    }
                 }
-                .foregroundColor(.primary)
-
+                .allowsHitTesting(false)
                 Spacer(minLength: 0)
-
-                GeometryReader { g in
-                    let side = min(g.size.width, g.size.height)
-                    Artwork(url: t?.artwork(), size: side, corner: 16)
-                        .shadow(color: .black.opacity(0.3), radius: 20, y: 10)
-                        .scaleEffect(player.isPlaying ? 1 : 0.88)
-                        .animation(.spring(response: 0.4, dampingFraction: 0.7), value: player.isPlaying)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-                .aspectRatio(1, contentMode: .fit)
-
-                Spacer(minLength: 0)
-
-                HStack(alignment: .center) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(t?.title ?? "—").font(.title3.bold()).lineLimit(2)
-                        Button { if let u = t?.user { artist = u } } label: {
-                            Text(t?.user?.name ?? "").font(.body).foregroundColor(.secondary).lineLimit(1)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    Spacer()
-                    if let t, session.loggedIn {
-                        Button { session.toggleLike(t) } label: {
-                            Image(systemName: session.likedIds.contains(t.id) ? "heart.fill" : "heart").font(.title2)
-                                .foregroundColor(session.likedIds.contains(t.id) ? .accentColor : .primary)
-                        }
-                    }
-                }
 
                 if let e = player.error {
-                    Text(e).font(.footnote).foregroundColor(.red).frame(maxWidth: .infinity, alignment: .leading)
+                    Text(e).font(.footnote).foregroundColor(.red).labelBox().padding(.bottom, 8)
                 } else if t?.isSnipped == true {
-                    Text("Трек Go+: без подписки играет только превью 30 секунд").font(.footnote).foregroundColor(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text("Go+: без подписки играет только превью 30 с").font(.footnote).foregroundColor(.white)
+                        .labelBox(Color.sc).padding(.bottom, 8)
                 }
 
-                Scrubber(clock: player.clock) { player.seek(to: $0) }
+                WaveformScrubber(track: t, clock: player.clock) { player.seek(to: $0) }
+                    .frame(height: 96)
+                    .padding(.bottom, 14)
 
-                HStack {
-                    Button { player.toggleShuffle() } label: {
-                        Image(systemName: "shuffle").font(.title3).foregroundColor(player.shuffle ? .accentColor : .secondary)
-                    }
-                    Spacer()
-                    Button { player.previous() } label: { Image(systemName: "backward.fill").font(.system(size: 30)) }
-                    Spacer()
-                    Button { player.togglePlay() } label: {
-                        ZStack {
-                            Circle().fill(Color.primary).frame(width: 74, height: 74)
-                            if player.isBuffering && player.isPlaying {
-                                ProgressView().tint(Color(.systemBackground))
-                            } else {
-                                Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                                    .font(.system(size: 30)).foregroundColor(Color(.systemBackground))
-                                    .offset(x: player.isPlaying ? 0 : 2)
-                            }
-                        }
-                    }
-                    Spacer()
-                    Button { player.next() } label: { Image(systemName: "forward.fill").font(.system(size: 30)) }
-                    Spacer()
-                    Button { player.cycleRepeat() } label: {
-                        Image(systemName: player.repeatMode == .one ? "repeat.1" : "repeat").font(.title3)
-                            .foregroundColor(player.repeatMode == .off ? .secondary : .accentColor)
-                    }
-                }
-                .foregroundColor(.primary)
-
-                HStack {
-                    RoutePicker().frame(width: 44, height: 44)
-                    Spacer()
-                    if let t {
-                        if downloads.ids.contains(t.id) {
-                            Image(systemName: "checkmark.circle.fill").font(.title3).foregroundColor(.accentColor)
-                        } else if let p = downloads.progress[t.id] {
-                            ProgressView(value: p).progressViewStyle(.circular)
-                        } else {
-                            Button { downloads.download([t]) } label: { Image(systemName: "arrow.down.circle").font(.title3) }
-                        }
-                    }
-                    Spacer()
-                    Button { showQueue = true } label: { Image(systemName: "list.bullet").font(.title3).frame(width: 44, height: 44) }
-                }
-                .foregroundColor(.primary)
+                controls
+                    .padding(.bottom, 18)
+                bottomBar(t)
             }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 8)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 6)
+            .animation(.easeOut(duration: 0.2), value: player.isPlaying)
         }
+        .preferredColorScheme(.dark)
         .sheet(isPresented: $showQueue) { QueueView() }
         .sheet(item: $artist) { u in
             NavigationStack { UserView(user: u).tabRoot() }
@@ -196,34 +147,107 @@ struct NowPlayingView: View {
             NavigationStack { RelatedView(track: tr).tabRoot() }
         }
     }
-}
 
-private struct Scrubber: View {
-    @ObservedObject var clock: PlaybackClock
-    let onSeek: (Double) -> Void
-    @State private var dragging = false
-    @State private var value: Double = 0
-
-    var body: some View {
-        VStack(spacing: 4) {
-            Slider(value: Binding(get: { dragging ? value : clock.time }, set: { value = $0 }),
-                   in: 0...max(clock.duration, 1)) { editing in
-                if editing {
-                    value = clock.time
-                    dragging = true
-                } else {
-                    onSeek(value)
-                    dragging = false
+    private func header(_ t: SCTrack?) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(t?.title ?? "—").font(.system(size: 19, weight: .bold)).foregroundColor(.white)
+                    .lineLimit(2).labelBox()
+                Button { if let u = t?.user { artist = u } } label: {
+                    Text(t?.user?.name ?? "").font(.system(size: 15)).foregroundColor(Color(white: 0.75)).lineLimit(1).labelBox()
+                }
+                .buttonStyle(.plain)
+                if let at = player.sleepAt {
+                    Label(at.formatted(date: .omitted, time: .shortened), systemImage: "moon.zzz.fill")
+                        .font(.caption).foregroundColor(.white).labelBox()
                 }
             }
-            HStack {
-                Text(formatDuration(dragging ? value : clock.time))
-                Spacer()
-                Text("-" + formatDuration(max(0, clock.duration - (dragging ? value : clock.time))))
+            Spacer(minLength: 0)
+            Button { dismiss() } label: {
+                Image(systemName: "chevron.down").font(.system(size: 17, weight: .bold)).foregroundColor(.white)
+                    .frame(width: 40, height: 40).background(Circle().fill(Color.black.opacity(0.6)))
             }
-            .font(.caption.monospacedDigit())
-            .foregroundColor(.secondary)
         }
+        .padding(.top, 8)
+    }
+
+    private var controls: some View {
+        HStack {
+            Button { player.toggleShuffle() } label: {
+                Image(systemName: "shuffle").font(.system(size: 19)).foregroundColor(player.shuffle ? .sc : .white)
+            }
+            Spacer()
+            Button { player.previous() } label: { Image(systemName: "backward.end.fill").font(.system(size: 28)) }
+            Spacer()
+            Button { player.togglePlay() } label: {
+                ZStack {
+                    Circle().fill(Color.sc).frame(width: 70, height: 70)
+                    if player.isBuffering && player.isPlaying {
+                        ProgressView().tint(.white)
+                    } else {
+                        Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 28)).offset(x: player.isPlaying ? 0 : 2)
+                    }
+                }
+            }
+            Spacer()
+            Button { player.next() } label: { Image(systemName: "forward.end.fill").font(.system(size: 28)) }
+            Spacer()
+            Button { player.cycleRepeat() } label: {
+                Image(systemName: player.repeatMode == .one ? "repeat.1" : "repeat").font(.system(size: 19))
+                    .foregroundColor(player.repeatMode == .off ? .white : .sc)
+            }
+        }
+        .foregroundColor(.white)
+    }
+
+    private func bottomBar(_ t: SCTrack?) -> some View {
+        HStack(spacing: 0) {
+            if let t, session.loggedIn {
+                let liked = session.likedIds.contains(t.id)
+                Button { session.toggleLike(t) } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: liked ? "heart.fill" : "heart").font(.system(size: 20))
+                        if let c = t.likesCount, c > 0 { Text(formatCount(c)).font(.caption.bold()) }
+                    }
+                    .foregroundColor(liked ? .sc : .white)
+                    .frame(height: 44)
+                }
+            } else if let c = t?.likesCount, c > 0 {
+                Label(formatCount(c), systemImage: "heart").font(.caption.bold()).foregroundColor(.gray)
+            }
+            Spacer()
+            RoutePicker().frame(width: 44, height: 44)
+            Spacer()
+            if let t {
+                if downloads.ids.contains(t.id) {
+                    Image(systemName: "arrow.down.circle.fill").font(.system(size: 20)).foregroundColor(.sc).frame(width: 44, height: 44)
+                } else if let p = downloads.progress[t.id] {
+                    ProgressView(value: p).progressViewStyle(.circular).tint(.sc).frame(width: 44, height: 44)
+                } else {
+                    Button { downloads.download([t]) } label: {
+                        Image(systemName: "arrow.down.circle").font(.system(size: 20)).frame(width: 44, height: 44)
+                    }
+                }
+            }
+            Spacer()
+            Button { showQueue = true } label: { Image(systemName: "list.bullet").font(.system(size: 20)).frame(width: 44, height: 44) }
+            Spacer()
+            if let t {
+                Menu {
+                    TrackMenu(track: t)
+                    if let u = t.user { Button { artist = u } label: { Label("К артисту", systemImage: "person") } }
+                    Button { related = t } label: { Label("Похожие треки", systemImage: "sparkles") }
+                    Menu {
+                        ForEach([15, 30, 45, 60, 90], id: \.self) { m in Button("\(m) мин") { player.setSleep(minutes: m) } }
+                        if player.sleepAt != nil { Button("Выключить", role: .destructive) { player.setSleep(minutes: nil) } }
+                    } label: { Label("Таймер сна", systemImage: "moon.zzz") }
+                } label: {
+                    Image(systemName: "ellipsis").font(.system(size: 20)).frame(width: 44, height: 44)
+                }
+            }
+        }
+        .foregroundColor(.white)
     }
 }
 
