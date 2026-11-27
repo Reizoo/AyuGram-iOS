@@ -85,13 +85,13 @@ struct WaveformScrubber: View {
                 Canvas { ctx, size in
                     for (i, v) in bars.enumerated() {
                         let x = CGFloat(i) * (bar + gap)
-                        let played = x / size.width < progress
+                        let played = Double(x / size.width) < progress
                         let up = max(2, CGFloat(v) * baseline)
                         let down = max(1, CGFloat(v) * (size.height - baseline) * 0.9)
                         ctx.fill(Path(CGRect(x: x, y: baseline - up, width: bar, height: up)),
-                                 with: .color(played ? .sc : .white.opacity(0.85)))
+                                 with: .color(played ? Color.sc : Color.white.opacity(0.85)))
                         ctx.fill(Path(CGRect(x: x, y: baseline + 1, width: bar, height: down)),
-                                 with: .color(played ? Color.sc.opacity(0.45) : .white.opacity(0.3)))
+                                 with: .color(played ? Color.sc.opacity(0.45) : Color.white.opacity(0.3)))
                     }
                 }
 
@@ -102,14 +102,14 @@ struct WaveformScrubber: View {
                 }
                 .font(.system(size: 12, weight: .semibold).monospacedDigit())
                 .fixedSize()
-                .position(x: min(max(w * progress, 50), w - 50), y: baseline)
+                .position(x: min(max(w * CGFloat(progress), 50), w - 50), y: baseline)
             }
             .contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 0)
-                    .onChanged { drag = min(1, max(0, $0.location.x / w)) }
+                    .onChanged { drag = Double(min(1, max(0, $0.location.x / w))) }
                     .onEnded { v in
-                        let f = min(1, max(0, v.location.x / w))
+                        let f = Double(min(1, max(0, v.location.x / w)))
                         onSeek(f * clock.duration)
                         drag = nil
                     }
