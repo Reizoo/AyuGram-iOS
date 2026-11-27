@@ -38,7 +38,7 @@ struct RootView: View {
             tab { HomeView() }
                 .tabItem { Label("Главная", systemImage: "house.fill") }
             tab { FeedTab() }
-                .tabItem { Label("Лента", systemImage: "bolt.horizontal.fill") }
+                .tabItem { Label("Лента", systemImage: "rectangle.stack") }
             tab { SearchView() }
                 .tabItem { Label("Поиск", systemImage: "magnifyingglass") }
             tab { LibraryView() }

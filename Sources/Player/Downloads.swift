@@ -223,11 +223,35 @@ final class History: ObservableObject {
     }
 }
 
+/// What was opened from search, newest first, plus the typed queries.
+enum RecentItem: Codable, Hashable, Identifiable {
+    case track(SCTrack)
+    case user(SCUser)
+    case playlist(SCPlaylist)
+
+    var id: String {
+        switch self {
+        case .track(let t): return "t\(t.id)"
+        case .user(let u): return "u\(u.id)"
+        case .playlist(let p): return "p\(p.id.value)"
+        }
+    }
+}
+
 /// Recent searches.
 @MainActor
 final class SearchHistory: ObservableObject {
     static let shared = SearchHistory()
     @Published private(set) var queries: [String] = UserDefaults.standard.stringArray(forKey: "search.recent") ?? []
+    @Published private(set) var items: [RecentItem] = []
+    private let itemsKey = "search.recentItems"
+
+    private init() {
+        guard let data = UserDefaults.standard.data(forKey: itemsKey) else { return }
+        let dec = JSONDecoder()
+        dec.keyDecodingStrategy = .convertFromSnakeCase
+        items = (try? dec.decode([RecentItem].self, from: data)) ?? []
+    }
 
     func add(_ q: String) {
         let s = q.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -238,8 +262,28 @@ final class SearchHistory: ObservableObject {
         UserDefaults.standard.set(queries, forKey: "search.recent")
     }
 
+    func add(_ item: RecentItem) {
+        items.removeAll { $0.id == item.id }
+        items.insert(item, at: 0)
+        if items.count > 30 { items.removeLast(items.count - 30) }
+        saveItems()
+    }
+
+    func remove(_ item: RecentItem) {
+        items.removeAll { $0.id == item.id }
+        saveItems()
+    }
+
     func clear() {
         queries = []
+        items = []
         UserDefaults.standard.removeObject(forKey: "search.recent")
+        UserDefaults.standard.removeObject(forKey: itemsKey)
+    }
+
+    private func saveItems() {
+        let enc = JSONEncoder()
+        enc.keyEncodingStrategy = .convertToSnakeCase
+        if let data = try? enc.encode(items) { UserDefaults.standard.set(data, forKey: itemsKey) }
     }
 }

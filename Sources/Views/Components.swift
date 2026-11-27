@@ -295,12 +295,19 @@ struct PlaylistCard: View {
     let playlist: SCPlaylist
     var body: some View {
         NavigationLink(value: Route.playlist(playlist)) {
-            VStack(alignment: .leading, spacing: 6) {
-                Artwork(url: playlist.artwork("t300x300"), size: 150, corner: 3)
-                Text(playlist.title ?? "—").font(.system(size: 13, weight: .semibold)).lineLimit(1)
-                Text(playlist.shortDescription ?? playlist.user?.name ?? "").font(.caption).foregroundColor(.secondary).lineLimit(1)
+            VStack(alignment: .leading, spacing: 4) {
+                Artwork(url: playlist.artwork("t300x300"), size: 164, corner: 0)
+                    .padding(.bottom, 6)
+                if let d = playlist.shortDescription, !d.isEmpty, playlist.isSystem {
+                    // Mixes are named by their artists.
+                    Text(d).font(.system(size: 14)).foregroundColor(.gray).lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                } else {
+                    Text(playlist.title ?? "—").font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                    Text(playlist.user?.name ?? "").font(.system(size: 13)).foregroundColor(.gray).lineLimit(1)
+                }
             }
-            .frame(width: 150)
+            .frame(width: 164, alignment: .leading)
         }
         .buttonStyle(.plain)
     }

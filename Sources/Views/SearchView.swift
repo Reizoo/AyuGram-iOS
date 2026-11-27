@@ -18,6 +18,18 @@ struct SearchView: View {
         VStack(spacing: 0) {
             if submitted.isEmpty {
                 List {
+                    if !recent.items.isEmpty {
+                        Section {
+                            ForEach(recent.items) { RecentRow(item: $0) }
+                        } header: {
+                            HStack {
+                                Text("Недавние").font(.system(size: 17, weight: .bold)).foregroundColor(.white).textCase(nil)
+                                Spacer()
+                                Button("Очистить") { recent.clear() }.font(.subheadline).textCase(nil)
+                            }
+                        }
+                        .listRowSeparator(.hidden)
+                    }
                     if !recent.queries.isEmpty {
                         Section {
                             ForEach(recent.queries, id: \.self) { q in
@@ -25,22 +37,21 @@ struct SearchView: View {
                                     query = q
                                     submitted = q
                                 } label: {
-                                    Label(q, systemImage: "clock.arrow.circlepath").foregroundColor(.primary)
+                                    Label(q, systemImage: "magnifyingglass").foregroundColor(.primary)
                                 }
                             }
                         } header: {
-                            HStack {
-                                Text("Недавние")
-                                Spacer()
-                                Button("Очистить") { recent.clear() }.font(.caption)
-                            }
+                            Text("Запросы").font(.system(size: 17, weight: .bold)).foregroundColor(.white).textCase(nil)
                         }
+                        .listRowSeparator(.hidden)
                     }
-                    Section("Обзор") {
+                    Section {
                         NavigationLink(value: Route.charts) { Label("Чарты", systemImage: "chart.line.uptrend.xyaxis") }
                     }
+                    .listRowSeparator(.hidden)
                 }
-                .listStyle(.insetGrouped)
+                .listStyle(.plain)
+                .scrollDismissesKeyboard(.immediately)
             } else {
                 Picker("Где искать", selection: $scope) {
                     ForEach(SearchScope.allCases) { Text($0.rawValue).tag($0) }
@@ -53,7 +64,8 @@ struct SearchView: View {
             }
         }
         .navigationTitle("Поиск")
-        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Треки, артисты, плейлисты")
+        .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Поиск")
         .autocorrectionDisabled()
         .onSubmit(of: .search) {
             let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -80,6 +92,8 @@ private struct SearchResults: View {
     @StateObject private var tracks: Pager<SCTrack>
     @StateObject private var users: Pager<SCUser>
     @StateObject private var playlists: Pager<SCPlaylist>
+    @EnvironmentObject private var recent: SearchHistory
+    @EnvironmentObject private var player: Player
 
     init(query: String, scope: SearchScope) {
         self.query = query
@@ -117,12 +131,22 @@ private struct SearchResults: View {
         List {
             switch scope {
             case .tracks:
-                TrackListSection(pager: tracks) { $0 }
+                ForEach(Array(tracks.items.enumerated()), id: \.offset) { i, t in
+                    TrackRow(track: t) {
+                        recent.add(.track(t))
+                        player.play(tracks.items, at: i)
+                    }
+                }
+                LoadMoreFooter(pager: tracks)
             case .users:
-                ForEach(users.items) { UserRow(user: $0) }
+                ForEach(users.items) { u in
+                    UserRow(user: u).simultaneousGesture(TapGesture().onEnded { recent.add(.user(u)) })
+                }
                 LoadMoreFooter(pager: users)
             case .playlists, .albums:
-                ForEach(playlists.items) { PlaylistRow(playlist: $0) }
+                ForEach(playlists.items) { p in
+                    PlaylistRow(playlist: p).simultaneousGesture(TapGesture().onEnded { recent.add(.playlist(p)) })
+                }
                 LoadMoreFooter(pager: playlists)
             }
             if loaded && empty {
@@ -140,5 +164,49 @@ private struct SearchResults: View {
             case .playlists, .albums: await playlists.loadIfNeeded()
             }
         }
+    }
+}
+
+/// A recently opened search result: artwork, title, subtitle and a cross that forgets it.
+private struct RecentRow: View {
+    let item: RecentItem
+    @EnvironmentObject private var recent: SearchHistory
+    @EnvironmentObject private var player: Player
+
+    var body: some View {
+        HStack(spacing: 14) {
+            switch item {
+            case .track(let t):
+                Button { player.play([t]) } label: {
+                    content(url: t.artwork("t120x120"), circle: false, title: t.title ?? "—", subtitle: t.user?.name ?? "")
+                }
+                .buttonStyle(.plain)
+            case .user(let u):
+                NavigationLink(value: Route.user(u)) {
+                    content(url: u.avatar("t120x120"), circle: true, title: u.name, subtitle: u.followersCount.map { "\(formatCount($0)) подписчиков" } ?? "")
+                }
+            case .playlist(let p):
+                NavigationLink(value: Route.playlist(p)) {
+                    content(url: p.artwork("t120x120"), circle: false, title: p.title ?? "—", subtitle: p.user?.name ?? "")
+                }
+            }
+            Button { withAnimation { recent.remove(item) } } label: {
+                Image(systemName: "xmark").font(.system(size: 17, weight: .semibold)).foregroundColor(.white)
+                    .frame(width: 36, height: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func content(url: URL?, circle: Bool, title: String, subtitle: String) -> some View {
+        HStack(spacing: 14) {
+            Artwork(url: url, size: 52, corner: 4, circle: circle)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 16, weight: .bold)).foregroundColor(.white).lineLimit(1)
+                Text(subtitle).font(.system(size: 15)).foregroundColor(.gray).lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .contentShape(Rectangle())
     }
 }

@@ -1,45 +1,58 @@
 import AVKit
 import SwiftUI
 
-/// SoundCloud's mini player: a flat bar above the tab bar with an orange progress line.
+/// The mini player: a floating rounded bar above the tab bar. The play button carries an orange
+/// progress ring; AirPlay and like sit on the right.
 struct MiniPlayer: View {
     @EnvironmentObject private var player: Player
     @EnvironmentObject private var session: Session
 
     var body: some View {
         if let t = player.current {
-            VStack(spacing: 0) {
-                MiniProgress(clock: player.clock)
-                HStack(spacing: 12) {
-                    Artwork(url: t.artwork("t120x120"), size: 44, corner: 2)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(t.title ?? "—").font(.system(size: 14, weight: .semibold)).foregroundColor(.white).lineLimit(1)
-                        Text(player.error ?? t.user?.name ?? "")
-                            .font(.system(size: 13)).foregroundColor(player.error == nil ? .gray : .red).lineLimit(1)
-                    }
-                    Spacer(minLength: 0)
-                    if session.loggedIn {
-                        let liked = session.likedIds.contains(t.id)
-                        Button { session.toggleLike(t) } label: {
-                            Image(systemName: liked ? "heart.fill" : "heart").font(.system(size: 20))
-                                .foregroundColor(liked ? .sc : .white).frame(width: 40, height: 44)
-                        }
-                    }
-                    if player.isBuffering && player.isPlaying {
-                        ProgressView().tint(.white).frame(width: 40, height: 44)
-                    } else {
-                        Button { player.togglePlay() } label: {
-                            Image(systemName: player.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 22))
-                                .foregroundColor(.white).frame(width: 40, height: 44)
+            HStack(spacing: 12) {
+                Button { player.togglePlay() } label: {
+                    ZStack {
+                        Circle().fill(Color(white: 0.08)).frame(width: 52, height: 52)
+                        ProgressRing(clock: player.clock).frame(width: 52, height: 52)
+                        Circle().fill(Color.white).frame(width: 40, height: 40)
+                        if player.isBuffering && player.isPlaying {
+                            ProgressView().tint(.black)
+                        } else {
+                            Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                                .font(.system(size: 18)).foregroundColor(.black)
+                                .offset(x: player.isPlaying ? 0 : 1.5)
                         }
                     }
                 }
-                .padding(.leading, 10)
-                .padding(.trailing, 6)
-                .padding(.vertical, 6)
+                .buttonStyle(.plain)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(t.title ?? "—").font(.system(size: 16, weight: .bold)).foregroundColor(.white).lineLimit(1)
+                    Text(player.error ?? t.user?.name ?? "")
+                        .font(.system(size: 15)).foregroundColor(player.error == nil ? Color(white: 0.7) : .red).lineLimit(1)
+                }
+                Spacer(minLength: 0)
+
+                RoutePicker().frame(width: 40, height: 44)
+                if session.loggedIn {
+                    let liked = session.likedIds.contains(t.id)
+                    Button { session.toggleLike(t) } label: {
+                        Image(systemName: liked ? "heart.fill" : "heart").font(.system(size: 22))
+                            .foregroundColor(liked ? .sc : .white).frame(width: 40, height: 44)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-            .background(Color.scSurface)
-            .overlay(alignment: .bottom) { Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5) }
+            .padding(.leading, 8)
+            .padding(.trailing, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule(style: .continuous).fill(Color(white: 0.16).opacity(0.96))
+                    .overlay(Capsule(style: .continuous).stroke(Color.white.opacity(0.08), lineWidth: 1))
+            )
+            .shadow(color: .black.opacity(0.4), radius: 10, y: 4)
+            .padding(.horizontal, 10)
+            .padding(.bottom, 6)
             .contentShape(Rectangle())
             .onTapGesture { player.showFullPlayer = true }
             .gesture(DragGesture(minimumDistance: 20).onEnded { v in
@@ -51,17 +64,15 @@ struct MiniPlayer: View {
     }
 }
 
-private struct MiniProgress: View {
+private struct ProgressRing: View {
     @ObservedObject var clock: PlaybackClock
     var body: some View {
-        GeometryReader { g in
-            ZStack(alignment: .leading) {
-                Rectangle().fill(Color.white.opacity(0.12))
-                Rectangle().fill(Color.sc)
-                    .frame(width: clock.duration > 0 ? g.size.width * min(1, clock.time / clock.duration) : 0)
-            }
-        }
-        .frame(height: 2)
+        let f = clock.duration > 0 ? min(1, clock.time / clock.duration) : 0
+        Circle()
+            .trim(from: 0, to: CGFloat(f))
+            .stroke(Color.sc, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+            .rotationEffect(.degrees(-90))
+            .padding(1.5)
     }
 }
 
@@ -251,11 +262,11 @@ struct NowPlayingView: View {
     }
 }
 
-private struct RoutePicker: UIViewRepresentable {
+struct RoutePicker: UIViewRepresentable {
     func makeUIView(context: Context) -> AVRoutePickerView {
         let v = AVRoutePickerView()
         v.prioritizesVideoDevices = false
-        v.tintColor = .label
+        v.tintColor = .white
         v.activeTintColor = .systemOrange
         return v
     }
